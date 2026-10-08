@@ -8,6 +8,7 @@ import {createApplications} from './applications.mjs';
 import {createMail} from './mail.mjs';
 import {createDatabase} from './database.mjs';
 import {createProfile} from './profile.mjs';
+import {createTransfer} from './transfer.mjs';
 import {storedCv,storedCvMaterial} from './cv-reader.mjs';
 import {RECORDS} from './workflow.mjs';
 
@@ -27,6 +28,7 @@ export function createHqServer(worker, environment, rootDirectory){
   const scout=createScout(connections,environment,{fetcher:routed,cvStore:storedCvText,profileStore:()=>profile.storedProfile(),cvReader:storedCv(storedCvText),cvMaterialReader:storedCvMaterial(storedCvText)});
   const applications=createApplications(connections,environment,{fetcher:routed});
   const mail=createMail(connections,environment,{fetcher:routed});
+  const transfer=createTransfer(connections,environment,{reload:()=>scout.reload(),working:()=>scout.busy()});
   const assets={async fetch(request){
     let pathname;
     try{pathname=decodeURIComponent(new URL(request.url).pathname);}catch{return new Response('Invalid path',{status:400});}
@@ -51,9 +53,9 @@ export function createHqServer(worker, environment, rootDirectory){
       const local=/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host);
       const url=new URL(req.url,(local?'http://':'https://')+host);
       let body;
-      if(['/api/connections','/api/scout','/api/applications','/api/mail','/api/database','/api/profile'].includes(url.pathname)&&req.method==='POST'){
+      if(['/api/connections','/api/scout','/api/applications','/api/mail','/api/database','/api/profile','/api/transfer'].includes(url.pathname)&&req.method==='POST'){
         // A CV upload is a whole PDF; every other request is a small piece of JSON.
-        const chunks=[],limit=url.pathname==='/api/profile'?5_600_000:65536;let size=0;
+        const chunks=[],limit=url.pathname==='/api/transfer'?60_000_000:url.pathname==='/api/profile'?5_600_000:65536;let size=0;
         for await(const chunk of req){size+=chunk.length;if(size>limit){res.writeHead(413,{'Cache-Control':'no-store'});res.end('Connection settings exceed the 64 KB limit');return;}chunks.push(chunk);}
         body=Buffer.concat(chunks);
       }
@@ -67,6 +69,7 @@ export function createHqServer(worker, environment, rootDirectory){
       else if(url.pathname==='/api/mail'||url.pathname==='/api/mail/callback')result=await mail.handle(request);
       else if(url.pathname==='/api/database')result=await database.handle(request);
       else if(url.pathname==='/api/profile')result=await profile.handle(request);
+      else if(url.pathname==='/api/transfer'&&expected)result=await transfer.handle(request);
       else if(url.pathname==='/api/snapshot'&&req.method==='GET'&&expected&&await database.live())result=await database.snapshot();
       else{
         const settings=environment;

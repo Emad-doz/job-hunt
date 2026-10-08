@@ -85,3 +85,13 @@ export const readCv=settings=>withProfile(settings,async connection=>{const [row
 export const writePhoto=(settings,{type,bytes,uploadedAt})=>withProfile(settings,connection=>connection.query("REPLACE INTO hq_files (`name`,filename,content,body,uploaded_at) VALUES ('photo',?,?,NULL,?)",[type,Buffer.from(bytes),uploadedAt]));
 export const readPhoto=settings=>withProfile(settings,async connection=>{const [rows]=await connection.query("SELECT filename,content FROM hq_files WHERE `name`='photo'");return rows[0]?{type:rows[0].filename,bytes:rows[0].content}:null;});
 export const removePhoto=settings=>withProfile(settings,connection=>connection.query("DELETE FROM hq_files WHERE `name`='photo'"));
+// Everything the database holds, for moving it to another installation: rows as they are, files as base64.
+export async function exportAll(settings){
+  const connection=await open(settings);
+  try{
+    await once(connection,settings,'changes',[...tables,receiptTable,removedTable]);await once(connection,settings,'profile',profileTables);
+    const all=async sql=>(await connection.query(sql))[0];
+    const jobs=await all('SELECT data FROM hq_jobs ORDER BY seq'),events=await all('SELECT data FROM hq_events ORDER BY seq'),meta=await all('SELECT `name`,`value` FROM hq_meta'),receipts=await all('SELECT id,record_id,data FROM hq_receipts'),removed=await all('SELECT id,data,removed_at FROM hq_removed'),profile=await all('SELECT data,saved_at FROM hq_profile WHERE id=1'),files=await all('SELECT `name`,filename,content,body,uploaded_at FROM hq_files');
+    return {records:{jobs:jobs.map(r=>parsed(r.data)),events:events.map(r=>parsed(r.data)),meta:Object.fromEntries(meta.map(r=>[r.name,parsed(r.value)])),receipts:receipts.map(r=>parsed(r.data)),removed:removed.map(r=>parsed(r.data))},cv:{profile:profile[0]?parsed(profile[0].data):null,savedAt:profile[0]?.saved_at||null,files:files.map(f=>({name:f.name,filename:f.filename,content:Buffer.from(f.content).toString('base64'),body:f.body||null,uploadedAt:f.uploaded_at}))}};
+  }finally{await connection.end().catch(()=>{});}
+}

@@ -69,5 +69,29 @@ export async function readCv(settings){const row=open(settings).prepare("SELECT 
 export async function writePhoto(settings,{type,bytes,uploadedAt}){open(settings).prepare("INSERT OR REPLACE INTO hq_files (name,filename,content,body,uploaded_at) VALUES ('photo',?,?,NULL,?)").run(type,Buffer.from(bytes),uploadedAt);}
 export async function readPhoto(settings){const row=open(settings).prepare("SELECT filename,content FROM hq_files WHERE name='photo'").get();return row?{type:row.filename,bytes:Buffer.from(row.content)}:null;}
 export async function removePhoto(settings){open(settings).prepare("DELETE FROM hq_files WHERE name='photo'").run();}
+// Everything the file holds, for moving it to another installation or keeping a backup: rows as they are, files as base64.
+export async function exportAll(settings){
+  const database=open(settings),all=sql=>database.prepare(sql).all(),profile=database.prepare('SELECT data,saved_at FROM hq_profile WHERE id=1').get();
+  return {records:{jobs:all('SELECT data FROM hq_jobs ORDER BY seq').map(r=>JSON.parse(r.data)),events:all('SELECT data FROM hq_events ORDER BY seq').map(r=>JSON.parse(r.data)),meta:Object.fromEntries(all('SELECT name,value FROM hq_meta').map(r=>[r.name,JSON.parse(r.value)])),receipts:all('SELECT data FROM hq_receipts').map(r=>JSON.parse(r.data)),removed:all('SELECT data FROM hq_removed').map(r=>JSON.parse(r.data))},
+    cv:{profile:profile?JSON.parse(profile.data):null,savedAt:profile?.saved_at||null,files:all('SELECT name,filename,content,body,uploaded_at FROM hq_files').map(f=>({name:f.name,filename:f.filename,content:Buffer.from(f.content).toString('base64'),body:f.body||null,uploadedAt:f.uploaded_at}))}};
+}
+// Replaces everything the file holds with an export, all or nothing.
+export async function importAll(settings,{records,cv}){
+  const database=open(settings),stamp=new Date().toISOString();database.exec('BEGIN IMMEDIATE');
+  try{
+    for(const table of ['hq_events','hq_jobs','hq_meta','hq_receipts','hq_removed','hq_profile','hq_files'])database.exec('DELETE FROM '+table);
+    records.jobs.forEach((job,i)=>database.prepare('INSERT INTO hq_jobs (id,seq,employer,role,status,applied,data,imported_at) VALUES (?,?,?,?,?,?,?,?)').run(text(job.id,64),i,text(job.employer,2000),text(job.role,2000),text(job.status,64),text(job.applied,64),JSON.stringify(job),stamp));
+    records.events.forEach((event,i)=>database.prepare('INSERT INTO hq_events (seq,id,record_id,type,data,imported_at) VALUES (?,?,?,?,?,?)').run(i,text(event.id,64),text(event.recordId,64),text(event.type,191),JSON.stringify(event),stamp));
+    for(const [name,value] of Object.entries(records.meta||{}))if(name!=='import')database.prepare('INSERT OR REPLACE INTO hq_meta (name,value) VALUES (?,?)').run(text(name,64),JSON.stringify(value));
+    for(const receipt of records.receipts||[])database.prepare('INSERT OR REPLACE INTO hq_receipts (id,record_id,data) VALUES (?,?,?)').run(text(receipt.id,64),text(receipt.recordId,64),JSON.stringify(receipt));
+    for(const trace of records.removed||[])database.prepare('INSERT OR REPLACE INTO hq_removed (id,data,removed_at) VALUES (?,?,?)').run(text(trace.id,64),JSON.stringify(trace),text(trace.removedAt||stamp,40));
+    if(cv.profile)database.prepare('INSERT INTO hq_profile (id,data,saved_at) VALUES (1,?,?)').run(JSON.stringify(cv.profile),cv.savedAt||stamp);
+    for(const file of cv.files||[])database.prepare('INSERT INTO hq_files (name,filename,content,body,uploaded_at) VALUES (?,?,?,?,?)').run(file.name,text(file.filename,191),Buffer.from(file.content,'base64'),file.body??null,file.uploadedAt||stamp);
+    // Numbers already used stay used: by the imported records and by the ones they once replaced.
+    const counters=records.meta?.counters||{},used={job:Math.max(Number(counters.job)||0,top(records.jobs.map(j=>({data:JSON.stringify(j)})),'JOB-'),top((records.removed||[]).map(j=>({data:JSON.stringify(j)})),'JOB-')),event:Math.max(Number(counters.event)||0,top(records.events.map(e=>({data:JSON.stringify(e)})),'EVT-'))};
+    database.prepare("INSERT OR REPLACE INTO hq_meta (name,value) VALUES ('counters',?)").run(JSON.stringify(used));
+    database.exec('COMMIT');
+  }catch(error){try{database.exec('ROLLBACK');}catch{}throw error;}
+}
 // For tests and for a clean shutdown.
 export function closeAll(){for(const database of opened.values())try{database.close();}catch{}opened.clear();}
