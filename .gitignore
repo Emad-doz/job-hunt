@@ -1,0 +1,16 @@
+node_modules/
+dist/
+work/
+# Your own data and settings never belong in the repository.
+data/
+.env
+.env.*
+!.env.example
+*.enc
+*.db
+*.db-*
+*.pem
+*.key
+.DS_Store
+npm-debug.log*
+*.tsbuildinfo
