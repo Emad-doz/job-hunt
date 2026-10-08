@@ -1,0 +1,4 @@
+import type {ScoutState} from './scout';
+export type OwnerFeedback={id:string;key:string;jobId:string;recordId:string|null;decision:'not-fit'|'review';reason:string;at:string;source:string;history:{id:string;decision:string;reason:string;at:string}[]};
+export function feedbackIdentity(value:string){try{const u=new URL(value);for(const key of [...u.searchParams.keys()])if(!['jk','currentJobId','gh_jid','jobId','job_id'].includes(key))u.searchParams.delete(key);u.hash='';return 'URL:'+u.href.toLowerCase().replace(/\/$/,'');}catch{return '';}}
+export function ownerFeedbackFor(state:ScoutState,url:string,id:string){if(!state.protected)return undefined;return state.ownerFeedback?.[feedbackIdentity(url)]||state.ownerFeedback?.[id]||Object.values(state.ownerFeedback||{}).find(f=>f.recordId===id||f.jobId===id);}

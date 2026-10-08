@@ -1,0 +1,31 @@
+{
+  "name": "job-hunt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "demo": "node scripts/demo.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "node --env-file-if-exists=.env scripts/serve.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/check-review.mjs && node tests/check-matching.mjs && node tests/check-analyst-ai.mjs && node tests/check-cv-screening.mjs && node tests/check-motivation.mjs && node tests/check-jsearch.mjs && node tests/check-qualifications.mjs && node tests/check-discovery.mjs && node tests/check-applications.mjs && node tests/check-mail.mjs && node tests/check-mail-browser.mjs && node tests/check-database.mjs && node tests/check-store-local.mjs && node tests/check-settings-store.mjs && node tests/check-records.mjs && node tests/check-profile.mjs && node tests/check-cv-tailor.mjs && node tests/run-ui.mjs"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "esbuild-wasm": "0.28.2",
+    "lucide-react": "1.31.0",
+    "mysql2": "^3.24.5",
+    "pdf2json": "3.2.2",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "typescript": "5.9.3"
+  },
+  "description": "A private job-search workbench that runs on your own machine: find vacancies, screen them against your CV, track applications, and prepare a CV per vacancy.",
+  "license": "MIT"
+}

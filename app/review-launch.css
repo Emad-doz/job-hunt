@@ -1,0 +1,21 @@
+.home-review-control{margin:0 0 18px;padding:19px 22px;border:1px solid #43504840;border-radius:9px;background:linear-gradient(115deg,#171c19e6,#121914e6);}
+.home-review-main{display:flex;align-items:center;justify-content:space-between;gap:24px;}
+.home-review-main strong{display:block;font-size:17px;font-weight:500;color:#94dcae;margin:5px 0;}
+.home-review-main p:not(.eyebrow){font-size:12px;color:#a3b2a7;max-width:550px;line-height:1.65;}
+.home-review-main .eyebrow{font-size:10px;color:#77dc9c;letter-spacing:1.8px;}
+.home-review-main .primary-button{flex-shrink:0;white-space:nowrap;min-height:44px;}
+.home-review-main .primary-button:disabled{opacity:.45;cursor:not-allowed;}
+.home-review-alert{display:flex;align-items:flex-start;gap:9px;margin-top:15px;padding-top:13px;border-top:1px solid #efb56a30;font-size:12px;color:#7af4a7;line-height:1.6;}
+.home-review-alert svg{flex-shrink:0;margin-top:2px;}
+.home-review-notice,.home-review-summary,.home-review-error{font-size:12px;line-height:1.65;margin-top:12px;color:#a6b9ab;overflow-wrap:anywhere;}
+.home-review-error{color:#e5a898;}
+.home-review-summary{color:#a1aca4;}
+.office-alert{border-color:#efb56a75;box-shadow:inset 0 0 35px #efb56a07;}
+.flat-review-alert{outline:1px solid #efb56a77;border-radius:7px;box-shadow:0 0 20px #efb56a12;animation:office-request-glow 2s ease-in-out infinite;}
+.resident-alert{border-color:#efb56a!important;color:#efb56a!important;background:#1e4a2eef!important;box-shadow:0 0 18px #efb56a65!important;}
+.review-request-spinner{animation:spin 1.1s linear infinite;}
+@keyframes office-request-glow{50%{box-shadow:0 0 26px #efb56a28;outline-color:#efb56aa0;}}
+.alert-still,.alert-still .review-request-spinner{animation:none!important;}
+@media(prefers-reduced-motion:reduce){.flat-review-alert,.review-request-spinner{animation:none!important;}}
+@media(max-width:960px){.home-review-main{gap:18px;}}
+@media(max-width:760px){.home-review-control{padding:17px 16px;margin-bottom:15px;}.home-review-main{align-items:stretch;flex-direction:column;gap:14px;}.home-review-main strong{font-size:16px;}.home-review-main .primary-button{justify-content:center;width:100%;font-size:14px;}.home-review-alert{font-size:11px;}}

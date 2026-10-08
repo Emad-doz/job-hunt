@@ -1,0 +1,30 @@
+import {useEffect,useState,type FormEvent} from 'react';
+import {Check,Database} from 'lucide-react';
+import {zone} from './zone';
+
+export type DatabaseState={protected?:boolean;kind:'local'|'mysql';ready:boolean;file:string;configured:boolean;host:string;port:number;database:string;user:string;passwordSaved:boolean;last:null|{ok:boolean;at:string;message:string;warning?:string;warnedAt?:string}};
+const stamp=(at:string)=>new Date(at).toLocaleString('en-GB',{timeZone:zone(),day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+// Where your jobs, their history and your CV are kept: a file on this machine by default, or a MySQL database you point the app at.
+export default function DatabaseSettings({onChange}:{onChange?:(state:DatabaseState)=>void}){
+  const [state,setState]=useState<DatabaseState|null>(null),[host,setHost]=useState('localhost'),[port,setPort]=useState(3306),[database,setDatabase]=useState(''),[user,setUser]=useState(''),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[move,setMove]=useState<''|'mysql'|'local'>('');
+  const take=(v:DatabaseState)=>{setState(v);onChange?.(v);if(v.host){setHost(v.host);setPort(v.port);setDatabase(v.database);setUser(v.user);}};
+  useEffect(()=>{let stopped=false;fetch('/api/database',{cache:'no-store',signal:AbortSignal.timeout(15000)}).then(r=>r.ok?r.json():null).then(v=>{if(!stopped&&v)take(v as DatabaseState);}).catch(()=>{});return()=>{stopped=true;};},[]);
+  async function send(body:{action:string;[key:string]:unknown},asks:''|'mysql'|'local'=''){setBusy(true);setError('');setNotice('');try{const r=await fetch('/api/database',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)}),v=await r.json() as DatabaseState&{error?:string;message?:string};if(v.kind!==undefined)take(v);if(v.error)throw new Error(v.error);if(!r.ok)throw new Error(v.message||'The database request failed.');setNotice(v.message||'Saved.');setPassword('');setMove('');}catch(e){const message=e instanceof Error?e.message:'The database request failed.';if(asks&&/Confirm that the app should use a different one/.test(message))setMove(asks);setError(message);}finally{setBusy(false);}}
+  const save=(e:FormEvent)=>{e.preventDefault();send({action:'save',host,port,database,user,password,...(move==='mysql'?{confirmMove:true}:{})},'mysql');};
+  if(!state?.protected)return null;
+  const local=state.kind==='local';
+  return <section className="scout-view" id="database"><article className="source-card"><header><Database size={23}/><div><p className="eyebrow">YOUR RECORDS</p><h3>{local?'A file on this machine':'MySQL database'}</h3></div><span className="badge">{state.ready?'In use':'Saved · not tested'}</span></header>
+    <p>{local?'Your jobs, their history, your CV file, photo and details are kept in one database file on this machine. Nothing needs to be set up, and nothing is stored anywhere else.':'Your jobs, their history, your CV file, photo and details are kept in the MySQL database below.'}</p>
+    {local&&<p className="quiet">File: <code>{state.file}</code>. Back it up by copying this file while the app is stopped.</p>}
+    {error&&<div className="connection-feedback error" role="alert">{error}</div>}{notice&&<div className="connection-feedback success" role="status"><Check size={17}/>{notice}</div>}
+    <div className="scout-actions source-actions"><button type="button" className="subtle-button" disabled={busy} onClick={()=>send({action:'test'})}>{busy?'Working…':'Test the database'}</button>{!local&&<button type="button" className="text-button" disabled={busy} onClick={()=>send({action:'use-local',...(move==='local'?{confirmMove:true}:{})},'local')}>{move==='local'?'Confirm: use the file on this machine':'Use the file on this machine instead'}</button>}{move&&!busy&&<button type="button" className="text-button" onClick={()=>{setMove('');setError('');}}>Cancel</button>}</div>
+    {state.last&&<p className="quiet">Last test · {stamp(state.last.at)} · {state.last.message}{state.last.warning&&state.last.warnedAt?' A later test on '+stamp(state.last.warnedAt)+' failed: '+state.last.warning:''}</p>}
+    <details className="daily-search-controls" open={!local}><summary>{local?'Use a MySQL database instead':'MySQL connection'}</summary>
+      <p>For when you run the app on a server and want the records in a database there. Create a database and a user with all privileges on it first. Switching does not copy your records across: each store has its own.</p>
+      <form onSubmit={save}><div className="scout-search-fields"><label className="connection-field">Host<input value={host} onChange={e=>setHost(e.target.value)} required maxLength={253} disabled={busy}/></label><label className="connection-field">Port<input type="number" min={1} max={65535} value={port} onChange={e=>setPort(Number(e.target.value))} disabled={busy}/></label></div>
+      <div className="scout-search-fields"><label className="connection-field">Database name<input value={database} onChange={e=>setDatabase(e.target.value)} required maxLength={64} autoComplete="off" disabled={busy}/></label><label className="connection-field">Database user<input value={user} onChange={e=>setUser(e.target.value)} required maxLength={64} autoComplete="off" disabled={busy}/></label></div>
+      <label className="connection-field">Password<input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required={!state.passwordSaved} maxLength={200} placeholder={state.passwordSaved?'Saved · leave blank to keep':'The database user\'s password'} disabled={busy}/></label>
+      <div className="scout-actions source-actions"><button className="subtle-button" disabled={busy}>{move==='mysql'?'Confirm: use this MySQL database':'Save MySQL connection'} <Check size={15}/></button></div></form>
+      <p className="quiet">The password is kept in your encrypted settings and is never shown again. A saved connection is not used until it has passed a test.</p></details>
+  </article></section>;
+}

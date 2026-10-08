@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import {SEARCH_LIMITS,searchTerms,queryPlan,searchAdzuna} from '../server/search-plan.mjs';
+import {saveFeedback,feedbackKey} from '../server/owner-feedback.mjs';
+import {savePlanningStatus} from '../server/owner-status.mjs';
+import {parseDailyReport,compareReportJob} from '../server/report-parser.mjs';
+import {createScout} from '../server/scout.mjs';
+import {extractProfile} from '../server/cv-reader.mjs';
+import {importedListing,plain} from '../server/sources.mjs';
+const at='2026-10-04T12:00:00Z',terms=['CRO specialist','digital analyst','web analyst','digital consultant','ecommerce manager','SEO specialist'],config={appId:'synthetic',appKey:'synthetic-only-key',terms,location:'Amsterdam',distance:25};
+assert.equal(searchTerms(config,{}).length,6);assert.equal(searchTerms({terms:terms.concat('ignored')},{}).length,6);
+assert(searchTerms({}, {terms:['digital analyst']}).includes('data analist'));
+assert.equal(queryPlan(terms).length,12);assert.deepEqual(queryPlan(terms,3,'hourly').map(q=>q.term),terms.slice(3));
+let state={attempts:0,adzunaCursor:0},covered=[];
+const provider=async url=>{const u=new URL(url);assert.equal(u.searchParams.get('results_per_page'),'50');assert.equal(u.searchParams.get('where'),'Amsterdam');const page=Number(u.pathname.split('/').at(-1));covered.push(u.searchParams.get('what')+':'+page);return Response.json({results:Array.from({length:50},(_,i)=>({id:covered.at(-1)+'-'+i}))});};
+for(let i=0;i<4;i++){const result=await searchAdzuna(config,{},state,{fetcher:provider,mode:'hourly',at});assert.equal(result.coverage.attempted,3);assert.equal(result.source.status,'synced');}
+assert.equal(new Set(covered).size,12);assert.equal(state.adzunaCursor,0);assert.equal(state.attempts,12);
+covered=[];state={attempts:0};let r=await searchAdzuna(config,{},state,{fetcher:provider,mode:'manual',at});assert.equal(covered.length,12);assert.equal(r.listings.length,600);
+state={attempts:0};r=await searchAdzuna(config,{},state,{fetcher:async()=>Response.json({results:[{id:'one'}]}),at});assert.equal(r.coverage.attempted,6);assert.equal(r.listings.length,1);
+state={attempts:71};r=await searchAdzuna(config,{},state,{fetcher:provider,at});assert.equal(state.attempts,72);assert(r.coverage.limited);assert.equal(r.source.status,'partial');
+for(const status of [401,403,429]){let calls=0;r=await searchAdzuna(config,{}, {attempts:0},{fetcher:async()=>{calls++;return new Response('',{status});},at});assert.equal(calls,1);assert.equal(r.source.status,'error');assert(!JSON.stringify(r).includes(config.appKey));}
+assert.equal(SEARCH_LIMITS.dailyRequests,72);
+const job={id:'SOURCE-1',url:'https://careers.example.test/jobs/123?utm_source=chat'},id='HQ-F-00000000-0000-0000-0000-000000000001',body={requestId:id,expectedId:'',decision:'not-fit',reason:'Location / commute'};
+let saved=saveFeedback({},job,body,at);assert.equal(saved.feedback.key,feedbackKey(job));assert.equal(saveFeedback(saved.config,job,body,at).duplicate,true);
+assert.throws(()=>saveFeedback(saved.config,job,{...body,reason:'Different'},at),/different data/);
+assert.throws(()=>saveFeedback(saved.config,job,{...body,requestId:'HQ-F-00000000-0000-0000-0000-000000000002'},at),/another view/);
+saved=saveFeedback(saved.config,job,{requestId:'HQ-F-00000000-0000-0000-0000-000000000002',expectedId:id,decision:'review',reason:''},at);assert.equal(saved.feedback.decision,'review');assert.equal(saved.feedback.history[0].decision,'not-fit');assert(!saved.config.state);
+const report='Rank\tVacancy\tPublished terms\tSuitability\n1\tExample Company — Digital Analyst, Amsterdam\tSalary: €4000 monthly\tGA4 and SQL are mentioned.\n2\tSecond Company — CRO Specialist, Amsterdam\tHybrid\tExperiments and GA4.\nURL: https://careers.example.test/jobs/second\n- Example Company — Digital Analyst\n[Certain] Existing applications need email checks.\nMessage reference: https://outlook.live.com/mail/receipt';
+const parsed=parseDailyReport(report);assert.equal(parsed.rows.length,2);assert.equal(parsed.rows[0].url,'','Never borrow the next job URL');assert.equal(parsed.rows[1].url,'https://careers.example.test/jobs/second');assert.equal(parsed.rows[0].location,'Amsterdam');assert.equal(parsed.rows[0].salary,'€4000 monthly');
+const markdown=parseDailyReport('| 1 | Test Company — Digital Analyst, Amsterdam | [Vacancy](https://careers.example.test/jobs/one?utm_source=report) | GA4 |');assert.equal(markdown.rows.length,1);assert(markdown.rows[0].url.includes('/one'));
+assert(parseDailyReport('x'.repeat(20001)).truncated);assert.equal(parseDailyReport(Array.from({length:40},(_,i)=>`${i+1}. Company ${i} — Analyst ${i}, Amsterdam`).join('\n')).rows.length,30);
+assert.equal(compareReportJob(markdown.rows[0],[{id:'JOB-001',employer:'Test Company',role:'Digital Analyst',url:'https://careers.example.test/jobs/one'}],[]).status,'exists');
+assert.equal(compareReportJob({...markdown.rows[0],url:''},[{id:'JOB-001',employer:'Test Company',role:'Digital Analyst',url:'https://careers.example.test/jobs/other'}],[]).status,'possible');
+assert.equal(compareReportJob(parsed.rows[1],[],[]).status,'missing');
+const profile={...extractProfile('Synthetic applicant uses GA4 and SQL for digital analytics. I lead CRO experimentation and conversion optimization. English.'),readAt:at,modifiedAt:at};
+const vacancy={importMethod:'daily-report',url:'https://careers.example.test/jobs/analyst',employer:'Example',title:'Digital analyst',location:'Amsterdam',description:'Digital analyst using GA4 and SQL to measure conversion experiments. English required. Work with product stakeholders.'};
+for(const url of ['https://example.test/','https://docs.google.com/document/d/private/edit','https://www.linkedin.com/jobs/','https://nl.indeed.com/jobs?q=analyst'])assert.throws(()=>importedListing({...vacancy,url},profile,at),/single-vacancy/);
+const imported=importedListing(vacancy,profile,at);assert(imported.availability.includes('daily report'));assert.equal(imported.completeness,'Owner-provided daily report excerpt');
+let privateConfig={boards:[],},writes=0,reads=0;
+const connections={settings:async()=>({SCOUT_CONFIG:privateConfig}),updateScout:async fn=>{privateConfig=fn(privateConfig);}};
+const scout=createScout(connections,{HQ_ACCESS_PASSWORD:'synthetic-password',HQ_PUBLIC_ORIGIN:'https://hq.example.test'},{cvReader:async()=>profile,clock:()=>Date.parse(at),boardsDefault:[],fetcher:async(_url,init)=>{const b=JSON.parse(init.body);if(b.operation==='read-application-record'){reads++;return Response.json({ok:true,recordId:b.recordId,url:vacancy.url});}writes++;return Response.json({ok:true,recordId:'JOB-101',eventId:'EVT-202',at});}});
+const request=(action,fields={})=>new Request('https://hq.example.test/api/scout',{method:'POST',headers:{Origin:'https://hq.example.test',Host:'hq.example.test','Content-Type':'application/json'},body:JSON.stringify({action,...fields})});
+const get=async()=> (await scout.handle(new Request('https://hq.example.test/api/scout'))).json();
+try{
+ let response=await scout.handle(request('import',vacancy)),v=await response.json();assert.equal(response.status,200);assert(v.workflowId);assert.equal(writes,0);assert.equal((await get()).workflows[0].receipts.length,5);
+ const retry=await (await scout.handle(request('import',vacancy))).json();assert.equal(retry.workflowId,v.workflowId);assert.equal((await get()).results.length,1);
+ const planningBody={jobId:v.jobId,status:'Shortlisted',reason:'Owner reviewed the source',requestId:'HQ-P-00000000-0000-4000-8000-000000000001',expectedId:'',confirmStatus:true};
+ const planned=await (await scout.handle(request('planning-status',planningBody))).json();assert(planned.saved);assert.equal(planned.status.status,'Shortlisted');assert.equal(writes,0,'Planning never writes to Google');assert.equal(Object.values((await get()).ownerStatuses)[0].status,'Shortlisted');assert.equal((await(await scout.handle(request('planning-status',planningBody))).json()).duplicate,true);
+ assert.equal((await scout.handle(request('planning-status',{...planningBody,status:'Applied',requestId:planningBody.requestId.slice(0,-1)+'2'}))).status,400);assert.equal((await scout.handle(request('planning-status',{...planningBody,status:'On hold',requestId:planningBody.requestId.slice(0,-1)+'3'}))).status,400);
+ const newerPlan=await(await scout.handle(request('planning-status',{...planningBody,status:'On hold',expectedId:planningBody.requestId,requestId:planningBody.requestId.slice(0,-1)+'4'}))).json();assert(newerPlan.saved);assert.equal(newerPlan.status.history[0].status,'Shortlisted');assert.equal(writes,0);
+ const feedback=await (await scout.handle(request('feedback',{jobId:v.jobId,...body}))).json();assert(feedback.saved);assert.equal((await get()).results[0].fit.eligible,true,'Owner preference preserves Analyst findings');assert.equal(writes,0);
+ await scout.handle(request('feedback',{recordId:'JOB-101',requestId:'HQ-F-00000000-0000-0000-0000-000000000003',expectedId:id,decision:'review',reason:''}));assert.equal(reads,1);assert.equal(writes,0);
+ response=await scout.handle(request('append',{workflowId:v.workflowId,confirmReviewed:true}));assert.equal(response.status,200);v=await response.json();assert.equal(v.receipt.recordId,'JOB-101');assert.equal(writes,1);
+ await scout.handle(request('append',{workflowId:retry.workflowId,confirmReviewed:true}));assert.equal(writes,1,'Verified append retry does not write again');
+ const held=await (await scout.handle(request('import',{...vacancy,url:'https://careers.example.test/jobs/legal',title:'Legal team lead',description:'Legal team lead requires a law degree and qualified lawyer experience in transactions. Manage legal counsel and contracts.'}))).json();assert.equal((await scout.handle(request('append',{workflowId:held.workflowId,confirmReviewed:true}))).status,400);assert.equal(writes,1);
+ const leaked=JSON.stringify(await get());assert(!leaked.includes('synthetic-password'));
+ assert.equal((await scout.handle(new Request('https://hq.example.test/api/scout',{method:'POST',headers:{Origin:'https://other.test',Host:'hq.example.test','Content-Type':'application/json'},body:JSON.stringify({action:'import',...vacancy})}))).status,400);
+}finally{scout.close();}
+// Employer feeds escape their HTML; no tag names or entities may survive as words.
+assert.equal(plain('&lt;p&gt;&lt;strong&gt;Who you are:&lt;/strong&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;3+ years with GA4 &amp;amp; SQL&lt;/li&gt;&lt;/ul&gt;'),'Who you are: 3+ years with GA4 & SQL');
+assert.equal(plain('<p>GA4 and SQL &amp; more&nbsp;here</p>'),'GA4 and SQL & more here');assert.equal(plain('Caf&eacute; &#8211; R&amp;D &unknown; &#0;'),'Caf\u00e9 \u2013 R&D &unknown;');
+console.log('Discovery checks passed: rotating coverage, pagination/caps/errors, duplicate-safe report extraction, provenance, owner preferences, reviewed imports and verified append retries. Synthetic data only.');

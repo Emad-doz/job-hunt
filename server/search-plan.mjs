@@ -1,0 +1,18 @@
+export const SEARCH_LIMITS={phrases:6,pages:2,pageSize:50,manualRequests:12,hourlyRequests:3,dailyRequests:72,storedResults:500};
+const aliases=[[/\bcro\b|conversion|experiment/i,['conversion optimization','conversie optimalisatie']],[/digital analyst|analytics|web analyst/i,['web analyst','data analist']],[/digital consult/i,['digital consultant','digital transformation']],[/e.?commerce/i,['ecommerce specialist','e-commerce']],[/\bseo\b/i,['SEO specialist']]];
+export function searchTerms(config,profile){const configured=Array.isArray(config.terms)&&config.terms.length,base=configured?config.terms:profile.terms||[],all=configured?base:[...base,...aliases.filter(([p])=>base.some(t=>p.test(t))).flatMap(([,terms])=>terms)];return [...new Set(all.map(t=>String(t).trim()).filter(t=>t.length>=2&&t.length<=60))].slice(0,SEARCH_LIMITS.phrases);}
+export function queryPlan(terms,cursor=0,mode='manual'){const all=Array.from({length:SEARCH_LIMITS.pages},(_,i)=>terms.map(term=>({term,page:i+1}))).flat();if(!all.length)return [];const start=mode==='hourly'?Math.max(0,Math.floor(cursor)||0)%all.length:0;return Array.from({length:mode==='hourly'?Math.min(SEARCH_LIMITS.hourlyRequests,all.length):all.length},(_,i)=>({...all[(start+i)%all.length],index:(start+i)%all.length}));}
+export async function searchAdzuna(config,profile,state,{fetcher=fetch,mode='manual',at}){
+ const terms=searchTerms(config,profile),queries=[],listings=new Map(),short=new Set(),plan=queryPlan(terms,state.adzunaCursor||0,mode);
+ let attempted=0,succeeded=0,limited=false,lastError=null;
+ for(const q of plan){if(q.page>1&&short.has(q.term))continue;if(state.attempts>=SEARCH_LIMITS.dailyRequests){limited=true;lastError='HQ daily Adzuna request limit reached; saved discoveries are retained.';break;}
+  state.attempts++;attempted++;if(mode==='hourly')state.adzunaCursor=(q.index+1)%(terms.length*SEARCH_LIMITS.pages);
+  const params=new URLSearchParams({app_id:config.appId,app_key:config.appKey,where:config.location||'',distance:String(config.distance||25),what:q.term,results_per_page:String(SEARCH_LIMITS.pageSize),'content-type':'application/json',sort_by:'date'});
+  try{const r=await fetcher('https://api.adzuna.com/v1/api/jobs/'+(/^[a-z]{2}$/.test(config.country||'')?config.country:'us')+'/search/'+q.page+'?'+params,{headers:{Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(20000)});
+   if(!r.ok){const message=r.status===429?'Adzuna rate limit reached. Saved discoveries retained.':r.status===401||r.status===403?'Adzuna rejected the saved credentials.':'Adzuna search unavailable (HTTP '+r.status+').';queries.push({...q,status:'error',count:0,error:message});lastError=message;if([401,403,429].includes(r.status))break;continue;}
+   const payload=await r.json();if(!Array.isArray(payload.results))throw new Error('Unexpected Adzuna response.');const rows=payload.results.slice(0,SEARCH_LIMITS.pageSize);for(const item of rows)if(item.id)listings.set(String(item.id),item);succeeded++;queries.push({...q,status:'synced',count:rows.length,error:null});if(rows.length<SEARCH_LIMITS.pageSize)short.add(q.term);
+  }catch{lastError='An Adzuna query could not finish. Saved discoveries retained.';queries.push({...q,status:'error',count:0,error:lastError});}
+ }
+ const partial=!!lastError||limited,status=succeeded?partial?'partial':'synced':'error';
+ return {listings:[...listings.values()],source:{id:'Adzuna',source:'Adzuna',status,at,count:listings.size,error:lastError},coverage:{mode,terms,pages:SEARCH_LIMITS.pages,pageSize:SEARCH_LIMITS.pageSize,attempted,succeeded,queries,limited,cursor:state.adzunaCursor||0,dailyUsed:state.attempts,dailyLimit:SEARCH_LIMITS.dailyRequests,at}};
+}
