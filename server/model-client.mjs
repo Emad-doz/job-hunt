@@ -1,5 +1,6 @@
 // Bundled into dist/server/model-client.mjs; the hosted runtime has no installed packages.
 import Anthropic from '@anthropic-ai/sdk';
+import {structuredOpenAi} from './model-openai.mjs';
 
 const fail=(message,billed=false)=>Object.assign(new Error(message),{billed});
 // A safety classifier can decline a harmless vacancy; let the API continue on its recommended substitute.
@@ -20,7 +21,9 @@ const spent=(total,usage={})=>({input:total.input+(usage.input_tokens||0),output
 const none={input:0,output:0,cacheRead:0,cacheWrite:0};
 const served=response=>({servedBy:response.model,fallback:(response.usage?.iterations??[]).some(entry=>entry.type==='fallback_message')});
 // One schema-constrained answer from stable instructions, a cacheable reference block and a request.
-async function structured({apiKey,model,system,reference,request,schema,fetcher}){
+const NAMES={openai:'OpenAI',gemini:'Google Gemini',compatible:'The AI service'};
+async function structured({provider,baseUrl,apiKey,model,system,reference,request,schema,fetcher}){
+  if(provider&&provider!=='anthropic')return structuredOpenAi({provider,baseUrl,apiKey,model,system,reference,request,schema,name:NAMES[provider]||NAMES.compatible,...(fetcher?{fetcher}:{})});
   let response;
   try{
     response=await connect(apiKey,fetcher,180000).beta.messages.create({model,max_tokens:16000,...fallback,output_config:{effort:'medium',format:{type:'json_schema',schema}},
@@ -40,7 +43,9 @@ export const requestProfile=({cvText,...rest})=>structured({...rest,reference:cv
 export const requestTailoredCv=({profileJson,vacancy,...rest})=>structured({...rest,reference:profileJson,request:vacancy});
 export const requestMotivation=({cvMaterial,vacancy,...rest})=>structured({...rest,reference:cvMaterial,request:vacancy});
 // Employer research: the model searches the public web itself and hands back what it read through one strict tool call. No CV material is part of this request.
-export async function requestCompanyResearch({apiKey,model,system,brief,schema,maxSearches,fetcher}){
+export async function requestCompanyResearch({provider,apiKey,model,system,brief,schema,maxSearches,fetcher}){
+  // Searching the web is a tool of the Anthropic API. With another provider nothing is looked up and the draft is written without employer facts.
+  if(provider&&provider!=='anthropic')return {found:{identified:false,about:'',facts:[]},servedBy:model,fallback:false,usage:none,searches:0};
   const client=connect(apiKey,fetcher,300000),messages=[{role:'user',content:brief}];let usage=none,searches=0;
   const tools=[{type:'web_search_20260209',name:'web_search',max_uses:maxSearches},{name:'record_company',description:'Record what you found about the employer. Call this exactly once, after your searches.',strict:true,input_schema:schema}];
   for(let turn=0;turn<4;turn++){

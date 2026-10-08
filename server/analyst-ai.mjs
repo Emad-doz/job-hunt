@@ -1,8 +1,13 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {cleanBase,NO_KEY} from './model-openai.mjs';
 
 // Advisory model-based assessment. It never changes CV screening, drafts gating or the tracker.
 export const AI_VERSION='analyst-model-v2';
 export const AI_MODELS={'claude-opus-5-5':'Claude Opus 5.5','claude-sonnet-5-5':'Claude Sonnet 5.5'};
+// Who receives the requests. Anthropic is used through its own SDK; the others through the OpenAI chat-completions format.
+export const AI_PROVIDERS={anthropic:'Anthropic (Claude)',openai:'OpenAI',gemini:'Google Gemini',compatible:'Another OpenAI-compatible service'};
+const RECIPIENT={anthropic:'Anthropic',openai:'OpenAI',gemini:'Google',compatible:'the service at the address you entered'};
+export const route=ai=>({provider:AI_PROVIDERS[ai?.provider]?ai.provider:'anthropic',baseUrl:ai?.baseUrl||''});
 export const AI_SCOPES={evidence:'Retained CV evidence only',cv:'Professional CV text, contact lines removed'};
 export const AI_LIMITS={stored:300,dailyDefault:20,dailyMax:100,cvChars:30000,vacancyChars:20000};
 // Raised whenever enabling the model starts to cover a new use of the owner's material; the owner must confirm again.
@@ -87,26 +92,35 @@ export function verifyAssessment(raw,cvText,vacancyText){
 let bundled;
 export const bundledCall=name=>async request=>{bundled??=import(new URL('../dist/server/model-client.mjs',import.meta.url));return (await bundled)[name](request);};
 const defaultCall=bundledCall('requestAssessment');
-export async function assessJob({job,profile,material,model,apiKey,call=defaultCall,fetcher,clock=Date.now}){
+export async function assessJob({job,profile,material,model,apiKey,provider,baseUrl,call=defaultCall,fetcher,clock=Date.now}){
   const description=String(job.description||'');
   if(description.length<80)throw new Error('This discovery has too little recorded vacancy text to assess. Import the full description first.');
   if(description.length>AI_LIMITS.vacancyChars)throw new Error('The recorded vacancy text exceeds the assessment limit. Nothing was sent.');
   const limited=job.completeness==='Aggregator excerpt',started=clock();
   const vacancy='<vacancy>\nRole: '+job.title+'\nEmployer: '+job.employer+'\nLocation: '+job.location+'\nSalary as recorded: '+job.salary+'\nSource: '+job.source+' ('+(job.completeness||'excerpt')+')'+(limited?'\nThis is a truncated excerpt from a job aggregator, not the full vacancy.':'')+'\n\n'+description+'\n</vacancy>\n\nAssess this vacancy for the candidate.';
-  const result=await call({apiKey,model,system:SYSTEM,cvMaterial:'<cv_material scope="'+material.scope+'">\n'+material.text+'\n</cv_material>',vacancy,schema:ASSESSMENT_SCHEMA,fetcher});
+  const result=await call({apiKey,model,provider,baseUrl,system:SYSTEM,cvMaterial:'<cv_material scope="'+material.scope+'">\n'+material.text+'\n</cv_material>',vacancy,schema:ASSESSMENT_SCHEMA,fetcher});
   let raw;try{raw=JSON.parse(result.text);}catch{throw new Error('The model returned an unreadable assessment. Nothing was recorded.');}
   const servedBy=result.servedBy||model;
   return {id:'HQ-A-'+randomUUID(),jobId:job.id,fingerprint:aiFingerprint(job,material,model),version:AI_VERSION,at:new Date(clock()).toISOString(),model,servedBy,fallback:!!result.fallback,scope:material.scope,cvReadAt:profile?.readAt||null,sourceReadAt:job.readAt||null,limited,vacancyChars:description.length,...verifyAssessment(raw,material.text,job.title+' '+description),usage:result.usage||null,costUsd:estimateCost(servedBy,result.usage),seconds:Math.round((clock()-started)/1000)};
 }
 export function saveAiSettings(current={},body){
-  const apiKey=String(body.apiKey||'').trim(),model=String(body.model||current.model||'claude-opus-5-5'),scope=String(body.scope||current.scope||'evidence'),dailyLimit=Number(body.dailyLimit??current.dailyLimit??AI_LIMITS.dailyDefault);
-  if(apiKey&&!/^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(apiKey))throw new Error('Enter an Anthropic API key beginning with sk-ant-.');
-  if(!apiKey&&!current.apiKey)throw new Error('Enter your Anthropic API key.');
-  if(!AI_MODELS[model])throw new Error('Choose a supported model.');
+  const was=route(current),provider=String(body.provider||was.provider),known=!!AI_PROVIDERS[provider],baseUrl=provider==='compatible'?cleanBase(body.baseUrl??current.baseUrl):'',moved=provider!==was.provider||baseUrl!==was.baseUrl;
+  if(!known)throw new Error('Choose a supported AI provider.');
+  let apiKey=String(body.apiKey||'').trim();const model=String(body.model||(moved?'':current.model)||(provider==='anthropic'?'claude-opus-5-5':'')).trim(),scope=String(body.scope||current.scope||'evidence'),dailyLimit=Number(body.dailyLimit??current.dailyLimit??AI_LIMITS.dailyDefault);
+  if(provider==='anthropic'){
+    if(apiKey&&!/^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(apiKey))throw new Error('Enter an Anthropic API key beginning with sk-ant-.');
+    if(!apiKey&&(moved||!current.apiKey))throw new Error('Enter your Anthropic API key.');
+    if(!AI_MODELS[model])throw new Error('Choose a supported model.');
+  }else{
+    if(apiKey&&!/^\S{8,400}$/.test(apiKey))throw new Error('Enter the API key as '+RECIPIENT[provider]+' gave it to you, without spaces.');
+    // A key saved for one provider is never sent to another. Only a service you name yourself may run without one.
+    if(!apiKey&&(moved||!current.apiKey)){if(provider!=='compatible')throw new Error('Enter your '+AI_PROVIDERS[provider]+' API key.');apiKey=NO_KEY;}
+    if(!/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,99}$/.test(model))throw new Error('Enter the model name exactly as the provider writes it, for example the name from its model list.');
+  }
   if(!AI_SCOPES[scope])throw new Error('Choose what CV material may be sent.');
   if(!Number.isInteger(dailyLimit)||dailyLimit<1||dailyLimit>AI_LIMITS.dailyMax)throw new Error('Choose a daily limit between 1 and '+AI_LIMITS.dailyMax+' assessments.');
-  if(body.enabled===true&&body.consent!==true)throw new Error('Confirm that the selected CV material and vacancy text may be sent to Anthropic.');
-  const kept=current.enabled&&current.scope===scope&&current.consentVersion===CONSENT_VERSION&&current.consentAt;
-  return {apiKey:apiKey||current.apiKey,model,scope,dailyLimit,enabled:body.enabled===true,consentAt:body.enabled===true?(kept||new Date().toISOString()):null,consentVersion:body.enabled===true?CONSENT_VERSION:null};
+  if(body.enabled===true&&body.consent!==true)throw new Error('Confirm that the selected CV material and vacancy text may be sent to '+RECIPIENT[provider]+'.');
+  const kept=!moved&&current.enabled&&current.scope===scope&&current.consentVersion===CONSENT_VERSION&&current.consentAt;
+  return {provider,baseUrl,apiKey:apiKey||current.apiKey,model,scope,dailyLimit,enabled:body.enabled===true,consentAt:body.enabled===true?(kept||new Date().toISOString()):null,consentVersion:body.enabled===true?CONSENT_VERSION:null};
 }
-export const publicAi=(config={},usage={},day='')=>({consentCurrent:config.consentVersion===CONSENT_VERSION,configured:!!config.apiKey,enabled:!!(config.apiKey&&config.enabled),model:config.model||'claude-opus-5-5',scope:config.scope||'evidence',dailyLimit:config.dailyLimit||AI_LIMITS.dailyDefault,usedToday:usage.day===day?usage.count||0:0,consentAt:config.consentAt||null,models:AI_MODELS,scopes:AI_SCOPES,version:AI_VERSION});
+export const publicAi=(config={},usage={},day='')=>({consentCurrent:config.consentVersion===CONSENT_VERSION,configured:!!config.apiKey,enabled:!!(config.apiKey&&config.enabled),...route(config),providers:AI_PROVIDERS,webSearch:route(config).provider==='anthropic',model:config.model||'claude-opus-5-5',scope:config.scope||'evidence',dailyLimit:config.dailyLimit||AI_LIMITS.dailyDefault,usedToday:usage.day===day?usage.count||0:0,consentAt:config.consentAt||null,models:AI_MODELS,scopes:AI_SCOPES,version:AI_VERSION});

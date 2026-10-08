@@ -48,7 +48,7 @@ The Setup page shows these with their real state:
 3. **Add your CV.** Upload a PDF on My CV and fill in your details.
 4. **Say where you search.** Your town or region, your country code, and the roles you look for.
 5. **Connect a vacancy source.** A free key from JSearch or Adzuna, or employer career pages without any key. See [docs/vacancy-sources.md](docs/vacancy-sources.md).
-6. **Switch on the AI model** (optional). Your own Anthropic API key. See [docs/ai-model.md](docs/ai-model.md).
+6. **Switch on the AI model** (optional). Your own API key for Claude, OpenAI or Gemini, or a compatible service such as a local Ollama. See [docs/ai-model.md](docs/ai-model.md).
 7. **Connect your mailbox** (optional). Outlook or Hotmail. See [docs/mail.md](docs/mail.md).
 
 ## Where your data is
@@ -65,7 +65,7 @@ What leaves your machine, and only then:
 | When | What is sent | To |
 |---|---|---|
 | A search runs | Your role search terms and search area. Never your CV. | The vacancy sources you connected |
-| You start a screening, an assessment, a motivation draft, "Fill from my CV" or "Adapt my CV" | CV text or details, and the vacancy text | Anthropic, with your own API key |
+| You start a screening, an assessment, a motivation draft, "Fill from my CV" or "Adapt my CV" | CV text or details, and the vacancy text | The AI provider you chose, with your own API key (nobody, with a local model) |
 | You press "Check for replies" | A read-only request for your recent mail | Microsoft, for your own mailbox |
 
 Without an AI key and without a mailbox connection, the second and third rows never happen.
@@ -84,7 +84,7 @@ npm test           # synthetic checks; no network, no real data (build first)
 
 ## Known limits
 
-- **AI:** only Anthropic's Claude models are supported.
+- **AI:** built and used with Claude. OpenAI, Gemini and OpenAI-compatible services are supported through one shared request format that was checked with made-up answers only; employer research on the web works with Anthropic only.
 - **Mail:** only Outlook and Hotmail. Gmail is not supported yet.
 - **Languages:** the rules that read reply emails (rejection, invitation, offer) know English and Dutch wording.
 - **Rule-based screening:** the keyword rules that derive searches from a CV were written for digital, analytics and e-commerce roles. With an AI key, screening works for any profession; without one, enter your role searches yourself in Search settings.
