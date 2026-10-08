@@ -54,6 +54,8 @@ export function createHqServer(worker, environment, rootDirectory){
       const host=req.headers.host||'localhost';
       const local=/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host);
       const url=new URL(req.url,(local?'http://':'https://')+host);
+      // One address on your own machine: pages opened at 127.0.0.1 or [::1] move to localhost, where a mailbox sign-in can return.
+      if(local&&url.hostname!=='localhost'&&req.method==='GET'&&!url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/assets/')){res.writeHead(302,{Location:'http://localhost'+(url.port?':'+url.port:'')+url.pathname+url.search,'Cache-Control':'no-store'});res.end();return;}
       let body;
       if(['/api/connections','/api/scout','/api/applications','/api/mail','/api/database','/api/profile','/api/transfer'].includes(url.pathname)&&req.method==='POST'){
         // A CV upload is a whole PDF; every other request is a small piece of JSON.
