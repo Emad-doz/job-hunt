@@ -86,8 +86,8 @@ npm test           # synthetic checks; no network, no real data (build first)
 
 - **AI:** built and used with Claude. OpenAI, Gemini and OpenAI-compatible services are supported through one shared request format that was checked with made-up answers only; employer research on the web works with Anthropic only.
 - **Mail:** Outlook, Hotmail and Gmail, one mailbox at a time. The Gmail connection was checked with a stand-in for Google only; no real Gmail account was connected while building it.
-- **Languages:** the rules that read reply emails (rejection, invitation, offer) know English and Dutch wording.
-- **Rule-based screening:** the keyword rules that derive searches from a CV were written for digital, analytics and e-commerce roles. With an AI key, screening works for any profession; without one, enter your role searches yourself in Search settings.
+- **Languages:** the rules that read reply emails (rejection, invitation, offer) know English, Dutch, German, French, Spanish, Italian and Portuguese wording. The last five were written from common phrases and checked with made-up sentences, not by native speakers or on real mail.
+- **Rule-based screening:** without an AI key, a vacancy is recommended when its title contains one of your role names (your search terms and the job titles on My CV) and its text names at least one skill from My CV. That works for any profession and any language, but only by comparing the words as you wrote them: a vacancy in another language than your skills list, or one that describes a skill in other words, is not recognised. Searches are derived from the CV automatically only for digital, analytics and e-commerce roles; for other work, enter your role searches in Search settings. With an AI key, screening reads the vacancy as a whole.
 - **Adzuna** covers a limited set of countries; JSearch covers more.
 - **One user.** There are no accounts; the password protects the whole app.
 - The mailbox sign-in on `http://localhost` and the MySQL option have been tested with stand-ins and on one hosted setup, not on a range of machines.

@@ -19,7 +19,7 @@ const PRICES={'claude-opus-5-5':{input:4,output:20,cacheRead:0.2,cacheWrite:5},'
 export function estimateCost(model,usage){const p=PRICES[model];if(!p||!usage)return null;return Math.round(((usage.input||0)*p.input+(usage.output||0)*p.output+(usage.cacheRead||0)*p.cacheRead+(usage.cacheWrite||0)*p.cacheWrite)/100)/10000;}
 
 const yearRange=/\b(?:19|20)\d{2}\s*(?:[-–—/]|to|tot)\s*(?:(?:19|20)\d{2}|present|heden|now|current)\b/gi;
-const contactLabel=/@|https?:|www\.|linkedin|\b(?:phone|tel|telephone|telefoon|mobile|mobiel|e-?mail|address|adres|straat|postcode|date of birth|geboortedatum|nationality|nationaliteit|bsn)\b/i;
+const contactLabel=/@|https?:|www\.|linkedin|\b(?:phone|tel|telephone|telefoon|mobile|mobiel|e-?mail|address|adres|straat|postcode|date of birth|geboortedatum|nationality|nationaliteit|bsn|telefon|handy|adresse|anschrift|geburtsdatum|courriel|portable|date de naissance|correo|domicilio|fecha de nacimiento|telefono|cellulare|indirizzo|data di nascita|telefone|telem[oó]vel|celular|morada|data de nascimento)\b|t[ée]l[ée]phone|tel[ée]fono|direcci[oó]n|endere[cç]o|nationalit[éà]|staatsangeh[öo]rigkeit/i;
 function contactLine(line){
   // A Dutch postcode on a short line is an address; the same pattern inside a sentence is usually a year.
   if(contactLabel.test(line)||line.length<=80&&/\b\d{4}\s?[A-Z]{2}\b/.test(line))return true;

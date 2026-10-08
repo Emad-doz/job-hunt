@@ -1,6 +1,6 @@
 # The AI model
 
-Optional. Without it the app still searches, tracks and builds your CV as a PDF; screening then uses keyword rules.
+Optional. Without it the app still searches, tracks and builds your CV as a PDF; screening then compares names: your role names with the vacancy title, and the skills on My CV with the vacancy text.
 
 With it:
 

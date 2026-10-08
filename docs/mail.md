@@ -39,7 +39,7 @@ The menus in Google's console change from time to time; the names above are the 
 
 ## What happens with your mail
 
-A check reads your newest messages from the last 45 days and links one to an application when the employer's name appears in it or in the sender's address. Words in the message decide what is proposed: a rejection, an interview invitation, an offer, or a note that your profile is kept. The wording rules know English and Dutch.
+A check reads your newest messages from the last 45 days and links one to an application when the employer's name appears in it or in the sender's address. Words in the message decide what is proposed: a rejection, an interview invitation, an offer, or a note that your profile is kept. The wording rules know English, Dutch, German, French, Spanish, Italian and Portuguese. A reply in another language is still listed for its job, without a proposed status.
 
 A proposal is a guess. You read the email, and the status only changes when you press the button and confirm. Short previews of proposed replies are kept in your encrypted settings; full messages are not stored, and no mail is sent to the AI model.
 

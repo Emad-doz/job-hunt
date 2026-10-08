@@ -11,7 +11,7 @@
     "build": "node scripts/build.mjs",
     "start": "node --env-file-if-exists=.env scripts/serve.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/check-review.mjs && node tests/check-matching.mjs && node tests/check-analyst-ai.mjs && node tests/check-providers.mjs && node tests/check-cv-screening.mjs && node tests/check-motivation.mjs && node tests/check-jsearch.mjs && node tests/check-qualifications.mjs && node tests/check-discovery.mjs && node tests/check-applications.mjs && node tests/check-mail.mjs && node tests/check-mail-browser.mjs && node tests/check-gmail.mjs && node tests/check-database.mjs && node tests/check-store-local.mjs && node tests/check-transfer.mjs && node tests/check-settings-store.mjs && node tests/check-records.mjs && node tests/check-profile.mjs && node tests/check-cv-tailor.mjs && node tests/run-ui.mjs"
+    "test": "node tests/check-review.mjs && node tests/check-matching.mjs && node tests/check-neutral.mjs && node tests/check-analyst-ai.mjs && node tests/check-providers.mjs && node tests/check-cv-screening.mjs && node tests/check-motivation.mjs && node tests/check-jsearch.mjs && node tests/check-qualifications.mjs && node tests/check-discovery.mjs && node tests/check-applications.mjs && node tests/check-mail.mjs && node tests/check-mail-browser.mjs && node tests/check-gmail.mjs && node tests/check-database.mjs && node tests/check-store-local.mjs && node tests/check-transfer.mjs && node tests/check-settings-store.mjs && node tests/check-records.mjs && node tests/check-profile.mjs && node tests/check-cv-tailor.mjs && node tests/run-ui.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.131.0",

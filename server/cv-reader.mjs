@@ -28,8 +28,9 @@ export function parsePdf(bytes){return new Promise((resolve,reject)=>{
 // The text is transient: callers must not persist it. Only the bounded profile is retained.
 const missing='Upload your CV as a text-based PDF on the My CV page first.';
 // The CV is the PDF the owner uploaded on My CV. `store` returns its text with the file name and upload time.
-export const storedCvMaterial=store=>async()=>{const cv=await store();if(!cv||String(cv.text||'').trim().length<200)throw new Error(missing);return {profile:{...extractProfile(cv.text),name:cv.filename||'cv.pdf',mimeType:'application/pdf',modifiedAt:cv.uploadedAt||null,readAt:new Date().toISOString(),sourceUrl:''},text:cv.text};};
-export const storedCv=store=>async()=>(await storedCvMaterial(store)()).profile;
+// `own` adds the owner's own skills and role names (matching.mjs ownWords); a failure there never blocks reading the CV.
+export const storedCvMaterial=(store,own)=>async()=>{const cv=await store();if(!cv||String(cv.text||'').trim().length<200)throw new Error(missing);let words={};try{words=own?await own():{};}catch{}return {profile:{...extractProfile(cv.text),...words,name:cv.filename||'cv.pdf',mimeType:'application/pdf',modifiedAt:cv.uploadedAt||null,readAt:new Date().toISOString(),sourceUrl:''},text:cv.text};};
+export const storedCv=(store,own)=>async()=>(await storedCvMaterial(store,own)()).profile;
 // Without a CV store there is nothing to read.
 export async function readCvMaterial(){throw new Error(missing);}
 export async function readCv(){throw new Error(missing);}

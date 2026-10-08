@@ -10,6 +10,7 @@ import {createDatabase} from './database.mjs';
 import {createProfile} from './profile.mjs';
 import {createTransfer} from './transfer.mjs';
 import {storedCv,storedCvMaterial} from './cv-reader.mjs';
+import {ownWords} from './matching.mjs';
 import {RECORDS} from './workflow.mjs';
 
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.glb':'model/gltf-binary'};
@@ -25,7 +26,8 @@ export function createHqServer(worker, environment, rootDirectory){
   const database=createDatabase(connections,environment),profile=createProfile(connections,environment);
   const routed=async(url,init)=>url===RECORDS?database.change(JSON.parse(init.body)):fetch(url,init);
   const storedCvText=()=>profile.storedCv();
-  const scout=createScout(connections,environment,{fetcher:routed,cvStore:storedCvText,profileStore:()=>profile.storedProfile(),cvReader:storedCv(storedCvText),cvMaterialReader:storedCvMaterial(storedCvText)});
+  const ownScreeningWords=async()=>ownWords(await profile.storedProfile(),((await connections.settings()).SCOUT_CONFIG||{}).terms);
+  const scout=createScout(connections,environment,{fetcher:routed,cvStore:storedCvText,profileStore:()=>profile.storedProfile(),cvReader:storedCv(storedCvText,ownScreeningWords),cvMaterialReader:storedCvMaterial(storedCvText,ownScreeningWords)});
   const applications=createApplications(connections,environment,{fetcher:routed});
   const mail=createMail(connections,environment,{fetcher:routed});
   const transfer=createTransfer(connections,environment,{reload:()=>scout.reload(),working:()=>scout.busy()});
