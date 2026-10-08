@@ -4,6 +4,12 @@ import {applicationBridge} from './applications.mjs';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});
 const scopes='https://graph.microsoft.com/Mail.Read offline_access';
 const authRoot='https://login.microsoftonline.com/common/oauth2/v2.0/';
+// The second mailbox the Tracker can read. Like Outlook it is asked for reading only.
+const GMAIL={scopes:'https://www.googleapis.com/auth/gmail.readonly',authorize:'https://accounts.google.com/o/oauth2/v2/auth',token:'https://oauth2.googleapis.com/token',api:'https://gmail.googleapis.com/gmail/v1/users/me/'};
+export const MAIL_PROVIDERS={outlook:'Outlook / Hotmail',gmail:'Gmail'};
+const providerOf=c=>c?.provider==='gmail'?'gmail':'outlook';
+// Messages written for Outlook, said for Gmail.
+const gmailWords=value=>String(value).replace(/Outlook or Hotmail|Outlook/g,'Gmail').replace(/Microsoft/g,'Google').replace(/Mail\.Read/g,'gmail.readonly');
 const callbackPath='/api/mail/callback';
 const loginCookie='__Host-hq-outlook-login';
 const digest=value=>createHash('sha256').update(value).digest();
@@ -24,7 +30,7 @@ function loginFailure(value){
 }
 const clean=value=>String(value||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
 const norm=value=>clean(value).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
-function secureMessageLink(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&['outlook.live.com','outlook.office.com','outlook.office365.com'].includes(u.hostname)?u.href:'';}catch{return '';}}
+function secureMessageLink(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&['outlook.live.com','outlook.office.com','outlook.office365.com','mail.google.com'].includes(u.hostname)?u.href:'';}catch{return '';}}
 export function emailMatch(message,job){
   const subject=clean(message.subject),text=norm(subject+' '+message.bodyPreview+' '+(message.body?.content||'')),role=norm(job.role),employer=norm(job.employer);
   const employerMatch=employer.length>=3&&(' '+text+' ').includes(' '+employer+' '),roleMatch=role.length>=6&&(' '+text+' ').includes(' '+role+' ');
@@ -35,7 +41,20 @@ export function emailMatch(message,job){
   if(!message.id||!received||Number.isNaN(Date.parse(received)))return null;
   // An exact employer / role mention is evidence of a possible association,
   // not proof of sender authenticity or an application outcome.
-  return {subject:subject.slice(0,300),sender:clean(message.from?.emailAddress?.address).slice(0,254),receivedAt:received,url:secureMessageLink(message.webLink),excerpt:clean(message.body?.content||message.bodyPreview).slice(0,500),kind:receipt?'outlook-receipt':'outlook-message',match:applied&&received.slice(0,10)<applied?'Earlier than the reported application; verify the association.':'Employer and role / posting ID match; verify sender and vacancy.',reference:('Outlook · '+subject+' · from '+clean(message.from?.emailAddress?.address)+' · received '+received+' · message '+clean(message.internetMessageId||message.id)+' · '+secureMessageLink(message.webLink)).slice(0,1500)};
+  return {subject:subject.slice(0,300),sender:clean(message.from?.emailAddress?.address).slice(0,254),receivedAt:received,url:secureMessageLink(message.webLink),excerpt:clean(message.body?.content||message.bodyPreview).slice(0,500),kind:(message.mailbox==='gmail'?'gmail':'outlook')+(receipt?'-receipt':'-message'),match:applied&&received.slice(0,10)<applied?'Earlier than the reported application; verify the association.':'Employer and role / posting ID match; verify sender and vacancy.',reference:((message.mailbox==='gmail'?'Gmail':'Outlook')+' · '+subject+' · from '+clean(message.from?.emailAddress?.address)+' · received '+received+' · message '+clean(message.internetMessageId||message.id)+' · '+secureMessageLink(message.webLink)).slice(0,1500)};
+}
+// A Gmail message in the shape the matching code reads from Outlook: headers, the received time, the text and whether it was sent by the owner.
+const decoded=data=>{try{return Buffer.from(String(data||''),'base64url').toString('utf8');}catch{return '';}};
+function gmailBody(part,depth=0){
+  if(!part||depth>8)return {plain:'',html:''};let plain='',html='';
+  if(!part.filename&&part.body?.data){if(part.mimeType==='text/plain')plain=decoded(part.body.data);else if(part.mimeType==='text/html')html=decoded(part.body.data).replace(/<(style|script)[\s\S]*?<\/\1>/gi,' ');}
+  for(const child of Array.isArray(part.parts)?part.parts.slice(0,30):[]){const inner=gmailBody(child,depth+1);plain+=(plain&&inner.plain?'\n':'')+inner.plain;html+=inner.html;}
+  return {plain,html};
+}
+export function gmailShape(raw){
+  if(!raw||typeof raw.id!=='string'||!/^[A-Za-z0-9_-]{6,64}$/.test(raw.id))return null;
+  const header=name=>String((Array.isArray(raw.payload?.headers)?raw.payload.headers:[]).find(h=>String(h?.name).toLowerCase()===name)?.value||''),from=header('from'),address=(from.match(/<([^<>\s]+@[^<>\s]+)>/)||from.match(/([^\s<>"]+@[^\s<>"]+)/)||[])[1]||'',labels=Array.isArray(raw.labelIds)?raw.labelIds:[],received=Number(raw.internalDate),body=gmailBody(raw.payload);
+  return {mailbox:'gmail',id:raw.id,internetMessageId:header('message-id'),subject:header('subject'),from:{emailAddress:{name:from.replace(/<[^>]*>/,'').replace(/"/g,'').trim(),address}},receivedDateTime:Number.isFinite(received)&&received>0?new Date(received).toISOString():'',webLink:'https://mail.google.com/mail/u/0/#all/'+raw.id,bodyPreview:String(raw.snippet||''),body:{content:(body.plain||body.html).slice(0,200000)},parentFolderId:labels.includes('SENT')?'SENT':'INBOX',isDraft:labels.includes('DRAFT')};
 }
 // The Tracker reads replies and proposes a status; it never changes one. A proposal is a guess from the words in a message, for the owner to read and confirm.
 const replyKinds=[
@@ -93,16 +112,38 @@ export function createMail(connections,environment,{fetcher=fetch,clock=Date.now
   let device=null,webLogin=null,busy=false;
   const config=async()=>((await connections.settings()).SCOUT_CONFIG||{}).outlook||{};
   const save=update=>connections.updateScout(c=>({...c,outlook:update(c.outlook||{})}));
-  async function oauth(endpoint,params){const response=await fetcher(authRoot+endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(params),redirect:'error',signal:AbortSignal.timeout(20000)});let value;try{value=await response.json();}catch{throw new Error('Microsoft sign-in response unavailable.');}return {response,value};}
-  function checkedToken(value){
+  async function oauth(endpoint,params){const response=await fetcher(endpoint.startsWith('https://')?endpoint:authRoot+endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(params),redirect:'error',signal:AbortSignal.timeout(20000)});let value;try{value=await response.json();}catch{throw new Error('Microsoft sign-in response unavailable.');}return {response,value};}
+  function checkedToken(value,provider='outlook'){
+    if(provider==='gmail'){
+      const scopesGranted=String(value.scope||'').split(' ').filter(Boolean);
+      // Reading only: any Gmail permission beyond gmail.readonly is refused, so the app can never hold a right to send or change mail.
+      if(!value.access_token||!scopesGranted.includes(GMAIL.scopes)||scopesGranted.some(s=>s!==GMAIL.scopes&&/mail\.google\.com|\/auth\/gmail\./.test(s)))throw new Error('Read-only Gmail permission was not confirmed. Reconnect and allow reading only.');
+      return {access:value.access_token,refresh:value.refresh_token||'',expiresAt:clock()+Math.max(60,Math.min(86400,Number(value.expires_in)||3600))*1000};
+    }
     const granted=String(value.scope||'').toLowerCase().split(' ').map(s=>s.replace('https://graph.microsoft.com/',''));
     if(!value.access_token||!granted.includes('mail.read')||granted.some(s=>/mail\.(send|readwrite)/.test(s)))throw new Error('Read-only Microsoft mail permission was not confirmed. Reconnect with Mail.Read only.');
     return {access:value.access_token,refresh:value.refresh_token||'',expiresAt:clock()+Math.max(60,Math.min(86400,Number(value.expires_in)||3600))*1000};
   }
-  async function token(){const c=await config();if(c.tokens?.access&&c.tokens.expiresAt>clock()+60000)return c.tokens.access;if(!c.clientId||!c.tokens?.refresh)throw new Error('Connect Outlook in Connections before checking email.');if(c.tokens.flow==='web'&&!c.clientSecret)throw new Error('Save the Microsoft app credential in Connections before refreshing Outlook.');const {response,value}=await oauth('token',{client_id:c.clientId,grant_type:'refresh_token',refresh_token:c.tokens.refresh,scope:scopes,...(c.tokens.flow==='web'?{client_secret:c.clientSecret}:{})});if(!response.ok){await save(x=>({...x,error:'Outlook sign-in expired. Reconnect to check email.'}));throw new Error('Outlook sign-in expired. Reconnect in Connections.');}const next=checkedToken(value);next.refresh=next.refresh||c.tokens.refresh;if(c.tokens.flow)next.flow=c.tokens.flow;await save(x=>({...x,tokens:next,error:null}));return next.access;}
+  async function token(){const c=await config();if(c.tokens?.access&&c.tokens.expiresAt>clock()+60000)return c.tokens.access;if(!c.clientId||!c.tokens?.refresh)throw new Error('Connect Outlook in Connections before checking email.');if(c.tokens.flow==='web'&&!c.clientSecret)throw new Error('Save the Microsoft app credential in Connections before refreshing Outlook.');const google=providerOf(c)==='gmail',{response,value}=google?await oauth(GMAIL.token,{client_id:c.clientId,client_secret:c.clientSecret,grant_type:'refresh_token',refresh_token:c.tokens.refresh}):await oauth('token',{client_id:c.clientId,grant_type:'refresh_token',refresh_token:c.tokens.refresh,scope:scopes,...(c.tokens.flow==='web'?{client_secret:c.clientSecret}:{})});if(!response.ok){await save(x=>({...x,error:'Outlook sign-in expired. Reconnect to check email.'}));throw new Error('Outlook sign-in expired. Reconnect in Connections.');}const next=checkedToken(value,providerOf(c));next.refresh=next.refresh||c.tokens.refresh;if(c.tokens.flow)next.flow=c.tokens.flow;await save(x=>({...x,tokens:next,error:null}));return next.access;}
   async function graph(path,access){
     const response=await fetcher('https://graph.microsoft.com/v1.0/me/messages'+path,{headers:{Authorization:'Bearer '+access,Accept:'application/json',Prefer:'IdType="ImmutableId", outlook.body-content-type="text"'},redirect:'error',signal:AbortSignal.timeout(20000)});
     if(!response.ok)throw new Error(response.status===429?'Outlook throttled this check. Saved email evidence is retained.':response.status===401||response.status===403?'Outlook access unavailable. Reconnect with read-only Mail.Read permission.':'Outlook check unavailable. Saved email evidence is retained.');return response.json();
+  }
+  async function gmail(path,access){
+    const response=await fetcher(GMAIL.api+path,{headers:{Authorization:'Bearer '+access,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(20000)});
+    if(!response.ok)throw new Error(response.status===429?'Gmail throttled this check. Saved email evidence is retained.':response.status===401||response.status===403?'Gmail access unavailable. Reconnect with the read-only permission.':'Gmail check unavailable. Saved email evidence is retained.');return response.json();
+  }
+  // Recent received mail, newest first. Gmail lists only IDs, so each message is one more request, eight at a time and never more than the limit.
+  async function gmailMessages(access,startMs,limit){
+    const ids=[];let pageToken='',capped=false;
+    for(let page=0;page<4&&ids.length<limit;page++){
+      const list=await gmail('messages?'+new URLSearchParams({q:'after:'+Math.floor(startMs/1000)+' -in:sent -in:drafts -in:chats',maxResults:'100',...(pageToken?{pageToken}:{})}),access);
+      if(list.messages!==undefined&&!Array.isArray(list.messages))throw new Error('Gmail returned an unexpected message list.');
+      ids.push(...(list.messages||[]).map(m=>String(m?.id||'')).filter(id=>/^[A-Za-z0-9_-]{6,64}$/.test(id)));pageToken=typeof list.nextPageToken==='string'?list.nextPageToken:'';if(!pageToken)break;
+    }
+    if(pageToken||ids.length>limit){capped=true;ids.length=Math.min(ids.length,limit);}
+    const messages=[];for(let i=0;i<ids.length;i+=8)messages.push(...await Promise.all(ids.slice(i,i+8).map(async id=>gmailShape(await gmail('messages/'+id+'?format=full',access)))));
+    return {messages:messages.filter(m=>m&&!m.isDraft&&m.parentFolderId!=='SENT'),capped};
   }
   async function tracked(recordId){
     if(!/^JOB-\d{3,8}$/.test(recordId||''))throw new Error('Select a real tracked vacancy.');const c=(await connections.settings()).SCOUT_CONFIG||{};
@@ -113,6 +154,12 @@ export function createMail(connections,environment,{fetcher=fetch,clock=Date.now
   async function check(recordId){
     const job=await tracked(recordId);if(!job.appliedOn&&!['Applied','Submitted','Interview','Offer','Hired','Rejected','Withdrawn','Closed'].includes(job.status))throw new Error('Record your application before checking its email evidence.');
     const access=await token(),c=await config();if(c.lastCheck&&clock()-Date.parse(c.lastCheck)<60000)throw new Error('Wait one minute between email checks.');
+    if(providerOf(c)==='gmail'){
+      const now=new Date(clock()),start=new Date(Math.max(clock()-90*86400000,/^\d{4}-\d{2}-\d{2}$/.test(job.appliedOn||'')?Date.parse(job.appliedOn)-86400000:clock()-30*86400000)).toISOString(),{messages,capped}=await gmailMessages(access,Date.parse(start),150),candidates=[];
+      for(const message of messages){if(candidates.length>=10)break;const matched=emailMatch(message,job);if(!matched)continue;const key=createHash('sha256').update(recordId+'|'+message.id).digest('hex'),previous=c.checks?.find(r=>r.recordId===recordId)?.candidates.find(v=>v.key===key);candidates.push({...matched,key,attached:previous?.attached||null});}
+      const result={recordId,checkedAt:now.toISOString(),from:start,to:now.toISOString(),scanned:messages.length,capped,candidates};
+      await save(x=>({...x,lastCheck:result.checkedAt,error:null,checks:[...(x.checks||[]).filter(v=>v.recordId!==recordId).slice(-19),result]}));return result;
+    }
     const sentResponse=await fetcher('https://graph.microsoft.com/v1.0/me/mailFolders/sentitems?$select=id',{headers:{Authorization:'Bearer '+access,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(20000)});if(!sentResponse.ok)throw new Error('Outlook sent-folder identity unavailable. No incoming-message check completed.');const sent=await sentResponse.json();if(!sent.id)throw new Error('Outlook did not identify Sent Items. No check completed.');
     const now=new Date(clock()),start=new Date(Math.max(clock()-90*86400000,/^\d{4}-\d{2}-\d{2}$/.test(job.appliedOn||'')?Date.parse(job.appliedOn)-86400000:clock()-30*86400000)).toISOString();
     const parameters=new URLSearchParams({'$filter':'receivedDateTime ge '+start+' and receivedDateTime le '+now.toISOString()+' and isDraft eq false','$orderby':'receivedDateTime desc','$top':'50','$select':'id,internetMessageId,subject,from,receivedDateTime,webLink,bodyPreview,parentFolderId,isDraft'});
@@ -133,6 +180,11 @@ export function createMail(connections,environment,{fetcher=fetch,clock=Date.now
     const jobs=(Array.isArray(input)?input:[]).slice(0,80).filter(j=>j&&/^JOB-\d{3,8}$/.test(j.recordId||'')&&typeof j.employer==='string'&&j.employer.trim()).map(j=>({recordId:j.recordId,employer:clean(j.employer).slice(0,160),role:clean(j.role).slice(0,200),status:clean(j.status).slice(0,40),appliedOn:/^\d{4}-\d{2}-\d{2}$/.test(j.appliedOn||'')?j.appliedOn:''}));
     if(!jobs.length)throw new Error('No recorded applications are waiting for a reply.');
     const access=await token(),c=await config();if(c.lastCheck&&clock()-Date.parse(c.lastCheck)<60000)throw new Error('Wait one minute between email checks.');
+    if(providerOf(c)==='gmail'){
+      const now=new Date(clock()),start=new Date(clock()-45*86400000).toISOString(),{messages,capped}=await gmailMessages(access,Date.parse(start),300);
+      const result={checkedAt:now.toISOString(),from:start,scanned:messages.length,capped,jobs:jobs.length,proposals:proposeUpdates(messages,jobs,'SENT',c.repliesSeen||{})};
+      await save(x=>({...x,lastCheck:result.checkedAt,error:null,scan:result}));return result;
+    }
     const sentResponse=await fetcher('https://graph.microsoft.com/v1.0/me/mailFolders/sentitems?$select=id',{headers:{Authorization:'Bearer '+access,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(20000)});if(!sentResponse.ok)throw new Error('Outlook sent-folder identity unavailable. No incoming-message check completed.');const sent=await sentResponse.json();if(!sent.id)throw new Error('Outlook did not identify Sent Items. No check completed.');
     const now=new Date(clock()),start=new Date(clock()-45*86400000).toISOString();
     const parameters=new URLSearchParams({'$filter':'receivedDateTime ge '+start+' and receivedDateTime le '+now.toISOString()+' and isDraft eq false','$orderby':'receivedDateTime desc','$top':'50','$select':'id,subject,from,receivedDateTime,webLink,bodyPreview,body,parentFolderId,isDraft'});
@@ -150,7 +202,7 @@ export function createMail(connections,environment,{fetcher=fetch,clock=Date.now
     const u=new URL(request.url),flow=webLogin;
     const headers={'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'",'Content-Type':'text/plain; charset=utf-8'};
     if(request.method!=='GET')return new Response('Use the sign-in started from HQ.',{status:405,headers});
-    if(!flow||flow.expiresAt<=clock()||u.origin!==new URL(flow.redirectUri).origin||u.searchParams.getAll('state').length!==1||!same(u.searchParams.get('state'),flow.state)||!same(cookieValue(request),flow.cookie))return new Response('Sign-in could not be verified. Return to HQ and start a fresh Outlook sign-in. Keep this URL private.',{status:400,headers});
+    if(!flow||flow.expiresAt<=clock()||u.origin!==new URL(flow.redirectUri).origin||u.searchParams.getAll('state').length!==1||!same(u.searchParams.get('state'),flow.state)||!same(cookieValue(request),flow.cookie))return new Response('Sign-in could not be verified. Return to HQ and start a fresh mailbox sign-in. Keep this URL private.',{status:400,headers});
     if(busy)return new Response('Another HQ mail action is finishing. Return to HQ to check the connection.',{status:409,headers});
     busy=true;webLogin=null;
     let outcome='failed';
@@ -159,10 +211,11 @@ export function createMail(connections,environment,{fetcher=fetch,clock=Date.now
       else{
         const code=u.searchParams.get('code');if(u.searchParams.getAll('code').length!==1||!code||code.length>16000)throw new Error('Microsoft did not return a usable authorization. Start sign-in again from HQ.');
         const c=await config();if(c.clientId!==flow.clientId||!c.clientSecret)throw new Error('The Microsoft app settings changed during sign-in. Start again from HQ.');
-        const {response,value}=await oauth('token',{client_id:flow.clientId,client_secret:c.clientSecret,grant_type:'authorization_code',code,redirect_uri:flow.redirectUri,code_verifier:flow.verifier,scope:scopes});
+        const google=flow.provider==='gmail';if(providerOf(c)!==(flow.provider||'outlook'))throw new Error('The mailbox settings changed during sign-in. Start again from HQ.');
+        const {response,value}=google?await oauth(GMAIL.token,{client_id:flow.clientId,client_secret:c.clientSecret,grant_type:'authorization_code',code,redirect_uri:flow.redirectUri,code_verifier:flow.verifier}):await oauth('token',{client_id:flow.clientId,client_secret:c.clientSecret,grant_type:'authorization_code',code,redirect_uri:flow.redirectUri,code_verifier:flow.verifier,scope:scopes});
         if(!response.ok)throw new Error(loginFailure(value));
-        const tokens=checkedToken(value);if(!tokens.refresh)throw new Error('Microsoft offline access was not granted. Start sign-in again from HQ.');tokens.flow='web';
-        await graph('?'+new URLSearchParams({'$top':'1','$select':'id'}),tokens.access);
+        const tokens=checkedToken(value,flow.provider);if(!tokens.refresh)throw new Error('Microsoft offline access was not granted. Start sign-in again from HQ.');tokens.flow='web';
+        if(google)await gmail('profile',tokens.access);else await graph('?'+new URLSearchParams({'$top':'1','$select':'id'}),tokens.access);
         await save(x=>({...x,tokens,verifiedAt:new Date(clock()).toISOString(),error:null,signInError:null}));device=null;outcome='connected';
       }
     }catch(error){await save(x=>({...x,signInError:error.message||'Microsoft sign-in could not be verified. Start again from HQ.'}));}
@@ -170,9 +223,14 @@ export function createMail(connections,environment,{fetcher=fetch,clock=Date.now
     return new Response(null,{status:303,headers:{...headers,'Set-Cookie':browserCookie('',0),Location:new URL('/?outlook='+outcome+'#connections',flow.redirectUri).href}});
   }
   return {async handle(request){
+    const response=await this.answer(request);if(response.status===303||!(response.headers.get('content-type')||'').includes('json'))return response;
+    let current={};try{current=await config();}catch{}if(providerOf(current)!=='gmail')return response;
+    const value=await response.json();for(const key of ['message','error','signInError'])if(typeof value[key]==='string')value[key]=gmailWords(value[key]);
+    const worded=json(value,response.status),cookie=response.headers.get('set-cookie');if(cookie)worded.headers.set('Set-Cookie',cookie);return worded;
+  },async answer(request){
     if(!environment.HQ_ACCESS_PASSWORD)return json({error:'Owner sign-in required for private email evidence.'},403);
     if(new URL(request.url).pathname===callbackPath)return callback(request);
-    if(request.method==='GET'){try{const c=await config();let redirectUri='';try{redirectUri=publicOrigin(request,environment,c.webOrigin)+callbackPath;}catch{}return json({protected:true,configured:!!c.clientId,browserReady:!!(c.clientId&&c.clientSecret&&redirectUri),redirectUri,clientSecretConfigured:!!c.clientSecret,clientId:c.clientId||'',connected:!!c.tokens?.refresh&&!c.error,verifiedAt:c.verifiedAt||null,lastCheck:c.lastCheck||null,error:c.error||null,signInError:c.signInError||null,checks:c.checks||[],scan:keyed(c.scan)});}catch{return json({error:'Private mail settings unavailable.'},503);}}
+    if(request.method==='GET'){try{const c=await config();let redirectUri='';try{redirectUri=publicOrigin(request,environment,c.webOrigin)+callbackPath;}catch{}return json({protected:true,provider:providerOf(c),providers:MAIL_PROVIDERS,configured:!!c.clientId,browserReady:!!(c.clientId&&c.clientSecret&&redirectUri),redirectUri,clientSecretConfigured:!!c.clientSecret,clientId:c.clientId||'',connected:!!c.tokens?.refresh&&!c.error,verifiedAt:c.verifiedAt||null,lastCheck:c.lastCheck||null,error:c.error||null,signInError:c.signInError||null,checks:c.checks||[],scan:keyed(c.scan)});}catch{return json({error:'Private mail settings unavailable.'},503);}}
     if(request.method!=='POST')return json({error:'Method not allowed'},405);
     try{const origin=new URL(request.headers.get('origin'));if(origin.origin!==new URL(environment.HQ_PUBLIC_ORIGIN||request.url).origin||origin.host!==request.headers.get('host'))throw new Error();}catch{return json({error:'Email actions require a same-origin request.'},403);}
     if(!request.headers.get('content-type')?.startsWith('application/json'))return json({error:'JSON required'},415);
@@ -180,22 +238,28 @@ export function createMail(connections,environment,{fetcher=fetch,clock=Date.now
     try{
       const body=await request.json();
       if(body.action==='save'){
-        if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(body.clientId||''))throw new Error('Enter the Application (client) ID from your Microsoft app registration.');
-        const previous=await config(),secret=body.clientSecret;
+        const previous=await config(),secret=body.clientSecret,provider=body.provider===undefined?providerOf(previous):String(body.provider);
+        if(!MAIL_PROVIDERS[provider])throw new Error('Choose Outlook or Gmail.');
+        if(provider==='gmail'){if(!/^[0-9]{6,20}-[a-z0-9]{8,60}\.apps\.googleusercontent\.com$/.test(body.clientId||''))throw new Error('Enter the Client ID of your Google OAuth client. It ends with .apps.googleusercontent.com.');}
+        else if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(body.clientId||''))throw new Error('Enter the Application (client) ID from your Microsoft app registration.');
+        // Another mailbox or another app starts clean: the saved secret and sign-in belong to the old one.
+        const same=body.clientId===previous.clientId&&provider===providerOf(previous);if(!same&&secret===undefined&&provider==='gmail')throw new Error('Enter the Client secret of your Google OAuth client as well.');
         if(secret!==undefined&&(typeof secret!=='string'||secret.length<12||secret.length>1024||/[\r\n]/.test(secret)))throw new Error('Enter the Microsoft client secret Value. Keep it out of chat and GitHub.');
         const webOrigin=secret!==undefined?publicOrigin(request,environment):previous.webOrigin;
-        await save(x=>({...((body.clientId===previous.clientId)?x:{clientId:body.clientId,checks:x.checks||[]}),...(secret!==undefined?{clientSecret:secret,webOrigin}:{}),signInError:null}));device=null;webLogin=null;return json({saved:true,message:secret!==undefined?'Microsoft app credential saved privately. Register the shown Web return address, then connect Outlook.':'Microsoft app ID saved. Add the private app credential to enable browser sign-in.'});
+        await save(x=>({...(same?x:{clientId:body.clientId,checks:x.checks||[],repliesSeen:x.repliesSeen}),provider,...(secret!==undefined?{clientSecret:secret,webOrigin}:{}),signInError:null}));device=null;webLogin=null;return json({saved:true,message:secret!==undefined?'Microsoft app credential saved privately. Register the shown Web return address, then connect Outlook.':'Microsoft app ID saved. Add the private app credential to enable browser sign-in.'});
       }
       if(body.action==='connect-browser'){
         const c=await config();if(!c.clientId||!c.clientSecret)throw new Error('Save your Microsoft app ID and private client secret first.');
         const origin=publicOrigin(request,environment,c.webOrigin);if(new URL(request.url).origin!==origin)throw new Error('Start sign-in from the registered private HQ address.');
         const state=randomBytes(32).toString('base64url'),cookie=randomBytes(32).toString('base64url'),verifier=randomBytes(32).toString('base64url'),redirectUri=origin+callbackPath;
-        const url=new URL(authRoot+'authorize');url.search=new URLSearchParams({client_id:c.clientId,response_type:'code',redirect_uri:redirectUri,response_mode:'query',scope:scopes,state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256',prompt:'select_account'}).toString();
-        await save(x=>({...x,signInError:null}));webLogin={clientId:c.clientId,state,cookie,verifier,redirectUri,expiresAt:clock()+900000};device=null;
+        const google=providerOf(c)==='gmail',challenge=createHash('sha256').update(verifier).digest('base64url'),url=new URL(google?GMAIL.authorize:authRoot+'authorize');
+        // Google hands out a lasting sign-in only when asked for offline access with a fresh consent.
+        url.search=new URLSearchParams(google?{client_id:c.clientId,response_type:'code',redirect_uri:redirectUri,scope:GMAIL.scopes,state,code_challenge:challenge,code_challenge_method:'S256',access_type:'offline',prompt:'consent select_account'}:{client_id:c.clientId,response_type:'code',redirect_uri:redirectUri,response_mode:'query',scope:scopes,state,code_challenge:challenge,code_challenge_method:'S256',prompt:'select_account'}).toString();
+        await save(x=>({...x,signInError:null}));webLogin={provider:providerOf(c),clientId:c.clientId,state,cookie,verifier,redirectUri,expiresAt:clock()+900000};device=null;
         const response=json({status:'redirect',url:url.href});response.headers.set('Set-Cookie',browserCookie(cookie,900));return response;
       }
       if(body.action==='connect'){
-        const c=await config();if(!c.clientId)throw new Error('Save your Microsoft app client ID first.');const {response,value}=await oauth('devicecode',{client_id:c.clientId,scope:scopes});
+        const c=await config();if(providerOf(c)==='gmail')throw new Error('Gmail is connected with the browser sign-in.');if(!c.clientId)throw new Error('Save your Microsoft app client ID first.');const {response,value}=await oauth('devicecode',{client_id:c.clientId,scope:scopes});
         if(!response.ok||!value.device_code||!value.user_code)throw new Error('Microsoft could not start sign-in. Check that the registered app supports personal accounts and allows public client flows.');
         device={clientId:c.clientId,code:value.device_code,expiresAt:clock()+Math.min(1800,Number(value.expires_in)||900)*1000,interval:Math.max(5,Number(value.interval)||5),nextPoll:clock()+Math.max(5,Number(value.interval)||5)*1000};
         return json({status:'pending',userCode:value.user_code,url:'https://microsoft.com/devicelogin',expiresAt:new Date(device.expiresAt).toISOString(),interval:device.interval});

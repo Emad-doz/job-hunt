@@ -10,7 +10,7 @@ A private job-search workbench that runs on your own computer. It finds vacancie
 - **Jobs.** Every vacancy in one list: discoveries, applications, interviews, offers, rejections, an archive. You change a status with a note; nothing changes on its own.
 - **My CV.** Upload your CV as a PDF, keep your details as editable fields, choose one of four templates and download a PDF. With an AI key, the fields can be filled from your PDF and the CV can be adapted to one vacancy, using only what is in your details.
 - **Screening.** Rule-based by default. With an AI key, vacancies are judged against your CV, with reasons, and a motivation text can be drafted for one vacancy.
-- **Replies.** Optionally reads your Outlook mailbox when you ask, links replies to applications and proposes a status. You confirm every change.
+- **Replies.** Optionally reads your Outlook or Gmail mailbox when you ask, links replies to applications and proposes a status. You confirm every change.
 
 The app never applies for a job, never sends a message, and never changes a status by itself.
 
@@ -49,7 +49,7 @@ The Setup page shows these with their real state:
 4. **Say where you search.** Your town or region, your country code, and the roles you look for.
 5. **Connect a vacancy source.** A free key from JSearch or Adzuna, or employer career pages without any key. See [docs/vacancy-sources.md](docs/vacancy-sources.md).
 6. **Switch on the AI model** (optional). Your own API key for Claude, OpenAI or Gemini, or a compatible service such as a local Ollama. See [docs/ai-model.md](docs/ai-model.md).
-7. **Connect your mailbox** (optional). Outlook or Hotmail. See [docs/mail.md](docs/mail.md).
+7. **Connect your mailbox** (optional). Outlook, Hotmail or Gmail. See [docs/mail.md](docs/mail.md).
 
 ## Where your data is
 
@@ -66,7 +66,7 @@ What leaves your machine, and only then:
 |---|---|---|
 | A search runs | Your role search terms and search area. Never your CV. | The vacancy sources you connected |
 | You start a screening, an assessment, a motivation draft, "Fill from my CV" or "Adapt my CV" | CV text or details, and the vacancy text | The AI provider you chose, with your own API key (nobody, with a local model) |
-| You press "Check for replies" | A read-only request for your recent mail | Microsoft, for your own mailbox |
+| You press "Check for replies" | A read-only request for your recent mail | Microsoft or Google, for your own mailbox |
 
 Without an AI key and without a mailbox connection, the second and third rows never happen.
 
@@ -85,7 +85,7 @@ npm test           # synthetic checks; no network, no real data (build first)
 ## Known limits
 
 - **AI:** built and used with Claude. OpenAI, Gemini and OpenAI-compatible services are supported through one shared request format that was checked with made-up answers only; employer research on the web works with Anthropic only.
-- **Mail:** only Outlook and Hotmail. Gmail is not supported yet.
+- **Mail:** Outlook, Hotmail and Gmail, one mailbox at a time. The Gmail connection was checked with a stand-in for Google only; no real Gmail account was connected while building it.
 - **Languages:** the rules that read reply emails (rejection, invitation, offer) know English and Dutch wording.
 - **Rule-based screening:** the keyword rules that derive searches from a CV were written for digital, analytics and e-commerce roles. With an AI key, screening works for any profession; without one, enter your role searches yourself in Search settings.
 - **Adzuna** covers a limited set of countries; JSearch covers more.
