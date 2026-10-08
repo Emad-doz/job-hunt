@@ -16,10 +16,13 @@ const digest=value=>createHash('sha256').update(value).digest();
 const same=(a,b)=>typeof a==='string'&&typeof b==='string'&&timingSafeEqual(digest(a),digest(b));
 function cookieValue(request){return (request.headers.get('cookie')||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(loginCookie+'='))?.slice(loginCookie.length+1)||'';}
 function publicOrigin(request,environment,stored){
-  const u=new URL(environment.HQ_PUBLIC_ORIGIN||stored||request.url);
+  // On your own machine the address in the browser decides, not one remembered from an earlier visit.
+  const asked=new URL(request.url),here=asked.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(asked.hostname),u=new URL(environment.HQ_PUBLIC_ORIGIN||(here?asked.href:stored||request.url));
   // On your own machine the address is http://localhost; anywhere else it has to be HTTPS.
   const local=u.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(u.hostname);
   if(u.protocol!=='https:'&&!local||u.username||u.password)throw new Error('The mailbox sign-in needs the app to be opened at http://localhost or at an HTTPS address.');
+  // Microsoft and Google accept plain http only for the name localhost, so the numeric forms are not offered as a return address.
+  if(local&&u.hostname!=='localhost')throw new Error('Open the app at http://localhost:'+(u.port||'80')+' to connect a mailbox. Mailbox providers do not accept '+u.hostname+' as a return address.');
   return u.origin;
 }
 function loginFailure(value){
