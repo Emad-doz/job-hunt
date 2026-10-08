@@ -3,7 +3,7 @@ import {overlap,mentionedSkills} from './cv-reader.mjs';
 import {plain} from './sources.mjs';
 import {assessMatch,MATCH_VERSION} from './matching.mjs';
 const quote=(text,pattern)=>{const at=text.search(pattern);return at<0?'Not documented':text.slice(Math.max(0,at-80),Math.min(text.length,at+230));};
-export const fingerprint=(job,profile)=>createHash('sha256').update(JSON.stringify([MATCH_VERSION,job.id,job.title,job.description,job.salary,job.location,profile.modifiedAt,profile.skills,profile.evidence,profile.roleFamilies,profile.legalBackground,job.modelFit?.fit??null,job.modelFit?.reason??null])).digest('hex');
+export const fingerprint=(job,profile)=>createHash('sha256').update(JSON.stringify([MATCH_VERSION,job.id,job.title,job.description,job.salary,job.location,profile.modifiedAt,profile.skills,profile.evidence,profile.roleFamilies,profile.legalBackground,profile.ownSkills??null,profile.ownRoles??null,job.modelFit?.fit??null,job.modelFit?.reason??null])).digest('hex');
 export function buildWorkflow(job,profile,{clock=Date.now,mark=()=>{},event=()=>{}}={}){
   const id='HQ-W-'+randomUUID(),receipts=[];
   function receipt(agentId,title,findings,decision,method,handoff){mark(agentId,title,{workflowId:id,jobId:job.id});const r={id:'HQ-R-'+randomUUID(),workflowId:id,agentId,at:new Date(clock()).toISOString(),inputReceipt:receipts.at(-1)?.id||null,title,method,findings,decision};receipts.push(r);event(agentId,'Task completed',job.employer+' / '+job.title+': '+decision,handoff);return r;}
