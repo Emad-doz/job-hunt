@@ -4,6 +4,7 @@ import type {Snapshot} from './data';
 import type {ScoutState} from './scout';
 import {OutlookConnection} from './mail';
 import DatabaseSettings,{type DatabaseState} from './database-settings';
+import Transfer from './transfer';
 
 type Step={title:string;done:boolean;optional?:boolean;text:string;action?:{label:string;go:()=>void}};
 // Setup: the steps first, each with its real state, then the two connections that are made on this page.
@@ -32,6 +33,7 @@ export default function Connections({data,scout,onProfile,onSearch}:{data:Snapsh
     {locked&&<div className="owner-lock"><LockKeyhole size={21}/><div><strong>Set a password to use your own data.</strong><p>Copy <code>.env.example</code> to <code>.env</code>, set <code>HQ_ACCESS_PASSWORD</code> to a password of at least 20 characters, and start the app again. Sign in with the user name <code>owner</code>. Your saved keys are encrypted with this password, so keep it the same. Until then this is a demo with fictional records.</p></div></div>}
     <ol className="setup-steps">{steps.map((s,i)=><li key={s.title} className={s.done?'done':s===next?'next':''}><span className="setup-mark" aria-hidden="true">{s.done?<Check size={15}/>:i+1}</span><div><strong>{s.title}{s.optional&&<em>optional</em>}</strong><p>{s.text}</p></div>{s.action&&!locked&&<button className={s===next?'subtle-button':'text-button'} onClick={s.action.go}>{s.action.label} <ArrowUpRight size={14}/></button>}</li>)}</ol>
     <DatabaseSettings onChange={setDatabase}/>
+    <Transfer show={!!database?.protected}/>
     <div id="mail"><OutlookConnection/></div>
   </section>;
 }

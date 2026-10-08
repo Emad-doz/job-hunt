@@ -1,7 +1,7 @@
 // Where the records and the CV are kept. By default that is a SQLite file in the data folder on this machine (store-local.mjs). Someone who hosts the app can point it at a MySQL database instead (db-client.mjs, bundled into dist/server).
 import path from 'node:path';
 import * as localClient from './store-local.mjs';
-const names=['testConnection','readRecords','changeRecords','readProfile','writeProfile','writeCv','readCv','writePhoto','readPhoto','removePhoto'];
+const names=['testConnection','readRecords','changeRecords','readProfile','writeProfile','writeCv','readCv','writePhoto','readPhoto','removePhoto','exportAll'];
 let bundled;
 const mysqlClient=Object.fromEntries(names.map(name=>[name,async(...args)=>{bundled??=import(new URL('../dist/server/db-client.mjs',import.meta.url));return (await bundled)[name](...args);}]));
 export const dataDir=environment=>path.resolve(environment.HQ_DATA_DIR||'data');

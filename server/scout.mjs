@@ -441,6 +441,9 @@ export function createScout(connections,environment,{fetcher=fetch,cvReader=read
         throw new Error('Unsupported Scout action.');
       }catch(error){return json({error:error.message||'Scout action failed.'},400);}finally{touch();}
     },
+    busy(){return running;},
+    // After an import the saved state is read again, so the next save does not write the old one back.
+    async reload(){if(running)throw new Error('Wait for the current task to finish before importing.');const saved=(await connections.settings()).SCOUT_CONFIG||{};state={...state,results:[],workflows:[],events:[],aiReviews:[],motivations:[],ownerTexts:{},modelFits:{},profile:null,...(saved.state||{}),activeAgent:null,task:null,taskAt:null,taskContext:null};state.enabled=!!saved.enabled;state.status=state.enabled?'waiting':state.lastRun?'paused':'not-connected';touch();schedule();},
     close(){closed=true;clearTimeout(timer);}
   };
 }
