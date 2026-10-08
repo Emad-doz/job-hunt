@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {estimateCost,AI_LIMITS} from './analyst-ai.mjs';
+import {estimateCost,AI_LIMITS,route} from './analyst-ai.mjs';
 import {publicUrl} from './cv-screening.mjs';
 import {plain} from './sources.mjs';
 
@@ -34,9 +34,9 @@ export function companyFacts(raw){
 }
 export const motivationRequest=(job,company)=>'<vacancy>\nTitle: '+job.title+'\nEmployer: '+job.employer+'\nLocation: '+job.location+'\n'+String(job.description||'').slice(0,AI_LIMITS.vacancyChars)+'\n</vacancy>\n<employer_facts>\n'+(company.facts.length?company.facts.map((f,i)=>(i+1)+'. '+f.fact).join('\n'):'None found.')+'\n</employer_facts>';
 export async function draftMotivation({job,material,ai,researchCall,writeCall,fetcher,clock=Date.now}){
-  const research=await researchCall({apiKey:ai.apiKey,model:ai.model,system:RESEARCH_SYSTEM,brief:researchBrief(job),schema:COMPANY_SCHEMA,maxSearches:MOTIVATION_LIMITS.searches,fetcher});
+  const research=await researchCall({apiKey:ai.apiKey,model:ai.model,...route(ai),system:RESEARCH_SYSTEM,brief:researchBrief(job),schema:COMPANY_SCHEMA,maxSearches:MOTIVATION_LIMITS.searches,fetcher});
   const company=companyFacts(research.found);
-  const written=await writeCall({apiKey:ai.apiKey,model:ai.model,system:MOTIVATION_SYSTEM,cvMaterial:'<cv_material scope="'+material.scope+'">\n'+material.text+'\n</cv_material>',vacancy:motivationRequest(job,company),schema:MOTIVATION_SCHEMA,fetcher});
+  const written=await writeCall({apiKey:ai.apiKey,model:ai.model,...route(ai),system:MOTIVATION_SYSTEM,cvMaterial:'<cv_material scope="'+material.scope+'">\n'+material.text+'\n</cv_material>',vacancy:motivationRequest(job,company),schema:MOTIVATION_SCHEMA,fetcher});
   let raw;try{raw=JSON.parse(written.text);}catch{throw new Error('The model returned an unreadable draft. Nothing was recorded.');}
   const motivation=plain(raw.motivation).slice(0,1600);if(motivation.length<40)throw new Error('The model returned no usable motivation. Nothing was recorded.');
   const strings=(value,count)=>(Array.isArray(value)?value:[]).map(s=>plain(s).slice(0,240)).filter(Boolean).slice(0,count);

@@ -1,5 +1,6 @@
 // Filling the My CV fields from the uploaded CV: one model request the owner starts. The answer is a proposal for the owner to check and save; HQ saves nothing from it by itself.
 import {cleanProfile} from './profile.mjs';
+import {route} from './analyst-ai.mjs';
 const text={type:'string'},texts={type:'array',items:text};
 const object=(properties)=>({type:'object',properties,required:Object.keys(properties),additionalProperties:false});
 export const fieldsSchema=object({name:text,headline:text,email:text,phone:text,location:text,links:texts,about:text,skills:texts,
@@ -20,7 +21,7 @@ export const fieldsSystem=[
 ].join('\n');
 // Sends the CV text and returns the cleaned proposal with what the request used.
 export async function proposeFields({cvText,ai,call,fetcher}){
-  const model=ai.model||'claude-opus-5-5',result=await call({apiKey:ai.apiKey,model,system:fieldsSystem,cvText:String(cvText).slice(0,60000),schema:fieldsSchema,fetcher});
+  const model=ai.model||'claude-opus-5-5',result=await call({apiKey:ai.apiKey,model,...route(ai),system:fieldsSystem,cvText:String(cvText).slice(0,60000),schema:fieldsSchema,fetcher});
   let parsed;try{parsed=JSON.parse(result.text);}catch{throw new Error('The model\'s answer could not be read. Nothing was changed.');}
   return {profile:cleanProfile(parsed),model,servedBy:result.servedBy||model,usage:result.usage||null};
 }

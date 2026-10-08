@@ -7,7 +7,7 @@ import {SEARCH_LIMITS,searchAdzuna,searchTerms} from './search-plan.mjs';
 import {saveFeedback,feedbackKey} from './owner-feedback.mjs';
 import {savePlanningStatus} from './owner-status.mjs';
 import {assessMatch,focusLabels,MATCH_VERSION,REVIEW_LIMIT} from './matching.mjs';
-import {AI_LIMITS,VERDICTS,aiFingerprint,assessJob,bundledCall,cvMaterial,estimateCost,publicAi,saveAiSettings} from './analyst-ai.mjs';
+import {AI_LIMITS,VERDICTS,aiFingerprint,assessJob,bundledCall,cvMaterial,estimateCost,publicAi,route,saveAiSettings} from './analyst-ai.mjs';
 import {JSEARCH_LIMITS,searchJSearch,checkJSearchKey,saveJSearchSettings,publicJSearch} from './jsearch.mjs';
 import {MOTIVATION_LIMITS,draftMotivation} from './motivation.mjs';
 import {proposeFields} from './cv-fields.mjs';
@@ -135,7 +135,7 @@ export function createScout(connections,environment,{fetcher=fetch,cvReader=read
     for(let start=0;start<jobs.length;start+=SCREEN_LIMITS.batch){
       const batch=jobs.slice(start,start+SCREEN_LIMITS.batch);if(state.aiUsage.count>=limit){skipped+=batch.length;continue;}
       state.aiUsage.count++;
-      let result;try{result=await triageCall({apiKey:ai.apiKey,model:ai.model,system:TRIAGE_SYSTEM,cvMaterial:'<cv_material scope="'+material.scope+'">\n'+material.text+'\n</cv_material>',listings:triageRequest(batch),schema:TRIAGE_SCHEMA,fetcher});}catch(error){if(error.billed===false)state.aiUsage.count--;throw error;}
+      let result;try{result=await triageCall({apiKey:ai.apiKey,model:ai.model,...route(ai),system:TRIAGE_SYSTEM,cvMaterial:'<cv_material scope="'+material.scope+'">\n'+material.text+'\n</cv_material>',listings:triageRequest(batch),schema:TRIAGE_SCHEMA,fetcher});}catch(error){if(error.billed===false)state.aiUsage.count--;throw error;}
       servedBy=result.servedBy||ai.model;for(const key of Object.keys(usage))usage[key]+=result.usage?.[key]||0;
       let raw;try{raw=JSON.parse(result.text);}catch{throw new Error('The model returned an unreadable screening. Nothing was recorded for this batch.');}
       const verdicts=triageVerdicts(raw,batch,servedBy,at);missed+=batch.length-verdicts.size;
@@ -171,7 +171,7 @@ export function createScout(connections,environment,{fetcher=fetch,cvReader=read
         if(state.aiUsage.count>=limit||state.aiReviews.length>=AI_LIMITS.stored){state.aiRun.skipped++;continue;}
         mark('02','Model-based assessment: '+job.employer+' / '+job.title,{workflowId:null,jobId:job.id});
         state.aiUsage.count++;
-        let review;try{review=await assessJob({job,profile,material,model:ai.model,apiKey:ai.apiKey,call:modelCall,fetcher,clock});}catch(error){if(error.billed===false)state.aiUsage.count--;throw error;}
+        let review;try{review=await assessJob({job,profile,material,model:ai.model,apiKey:ai.apiKey,...route(ai),call:modelCall,fetcher,clock});}catch(error){if(error.billed===false)state.aiUsage.count--;throw error;}
         state.aiReviews.push(review);state.aiRun.assessed++;
         event('02','Task completed',job.employer+' / '+job.title+': model-based assessment recorded ('+VERDICTS[review.verdict]+'; '+review.strengths.length+' quote-checked strengths, '+review.unverified.length+' discarded). Advisory only; CV screening and the tracker are unchanged.');
       }

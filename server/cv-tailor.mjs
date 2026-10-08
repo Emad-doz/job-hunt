@@ -1,5 +1,6 @@
 // A CV adapted to one vacancy: one model request the owner starts. The model may choose and order what is already in the owner's saved details, and write the headline and the profile paragraph. It cannot add a skill, a job, a date or an achievement: whatever it returns is checked against the saved details and anything that is not there is dropped.
 import {cleanProfile} from './profile.mjs';
+import {route} from './analyst-ai.mjs';
 const text={type:'string'},texts={type:'array',items:text};
 const object=properties=>({type:'object',properties,required:Object.keys(properties),additionalProperties:false});
 export const tailorSchema=object({headline:text,about:text,skills:texts,experience:{type:'array',items:object({entry:{type:'integer'},points:texts})},changes:texts});
@@ -32,7 +33,7 @@ export async function tailorCv({profile,job,ai,call,fetcher}){
   const model=ai.model||'claude-opus-5-5',description=String(job.description||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
   if(description.length<200)throw new Error('This vacancy has too little text to adapt a CV to. Add the full vacancy text to the job first.');
   const vacancy='Vacancy: '+String(job.title||'').slice(0,200)+'\nEmployer: '+String(job.employer||'').slice(0,200)+'\nLocation: '+String(job.location||'').slice(0,120)+'\n\n'+description.slice(0,20000);
-  const result=await call({apiKey:ai.apiKey,model,system:tailorSystem,profileJson:JSON.stringify(saved),vacancy,schema:tailorSchema,fetcher});
+  const result=await call({apiKey:ai.apiKey,model,...route(ai),system:tailorSystem,profileJson:JSON.stringify(saved),vacancy,schema:tailorSchema,fetcher});
   let parsed;try{parsed=JSON.parse(result.text);}catch{throw new Error('The model\'s answer could not be read. Nothing was changed.');}
   return {...applyTailoring(saved,parsed),model,servedBy:result.servedBy||model,usage:result.usage||null};
 }
