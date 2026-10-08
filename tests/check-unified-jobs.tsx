@@ -48,7 +48,7 @@ const markup=renderToStaticMarkup(<DailyWorkspace {...props}/>);assert(markup.in
   assert.equal(openProposals({...scan,proposals:[{...proposal,status:'',label:'A message from this employer'}]},tracker).length,1,'a reply with no proposed status is still listed');
   const suggestion=suggestionFor(proposal);assert.equal(suggestion.status,'Rejected');assert(suggestion.reason.includes('Your application')&&suggestion.reason.includes('hr@example.test'));
   const item=collectJobs(tracker,{...state,results:[]}).find(i=>i.job?.id==='JOB-0101')!;
-  const filled=renderToStaticMarkup(<JobStatus item={item} data={tracker} state={{...state,results:[]}} replay={false} refresh={async()=>{}} sync={async()=>tracker} suggest={suggestion}/>);assert(filled.includes('aria-expanded="true"')&&filled.includes('Filled in from an Outlook reply'));
+  const filled=renderToStaticMarkup(<JobStatus item={item} data={tracker} state={{...state,results:[]}} replay={false} refresh={async()=>{}} sync={async()=>tracker} suggest={suggestion}/>);assert(filled.includes('aria-expanded="true"')&&filled.includes('Filled in from a reply the Tracker found in your mailbox'));
   assert(renderToStaticMarkup(<JobStatus item={item} data={tracker} state={{...state,results:[]}} replay={false} refresh={async()=>{}} sync={async()=>tracker}/>).includes('aria-expanded="false"'));
 }
 // The interview date entered with an Interview status travels in the note of that change and is read back from the job's newest event that carries one.
