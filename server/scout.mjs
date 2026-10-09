@@ -1,7 +1,7 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {readCv,readCvMaterial,overlap} from './cv-reader.mjs';
 import {defaultBoards,parseBoards,boardText,readBoard,importedListing,canonical} from './sources.mjs';
-import {buildWorkflow,fingerprint,sendRecord,appendWorkflow} from './workflow.mjs';
+import {buildWorkflow,fingerprint,sendRecord,appendWorkflow,ownerTrail} from './workflow.mjs';
 import {reviewPdf} from './report.mjs';
 import {SEARCH_LIMITS,searchAdzuna,searchTerms} from './search-plan.mjs';
 import {saveFeedback,feedbackKey} from './owner-feedback.mjs';
@@ -403,8 +403,13 @@ export function createScout(connections,environment,{fetcher=fetch,cvReader=read
           finally{running=false;state.activeAgent=null;state.task=null;state.taskAt=null;state.taskContext=null;state.status=state.enabled?'waiting':'idle';await persist();}
         }
         if(body.action==='append'){
-          if(running)throw new Error('Wait for the current task before saving to your tracker.');if(body.confirmReviewed!==true)throw new Error('Confirm that you reviewed this source and the proposed new discovery.');const workflow=state.workflows.find(w=>w.id===body.workflowId);if(!workflow)throw new Error('Workflow not found.');if(workflow.tracker)return json({saved:true,receipt:workflow.tracker,message:'This workflow already has a verified tracker receipt.'});if(!state.profile||!fitFor(workflow.job).eligible)throw new Error('Held by current CV role screening. Check the Analyst findings; no tracker write started.');if(workflow.fingerprint!==fingerprint(workflow.job,state.profile))throw new Error('Run agents 02–04 to update this saved review under the current matching rules. No tracker write started.');running=true;state.status='running';mark('00','Append reviewed discovery through the Coordinator bridge');
-          try{workflow.tracker=await appendWorkflow(workflow,(await connections.settings()).SCOUT_CONFIG||{},fetcher);event('00','Task completed',workflow.tracker.recordId+' / '+workflow.tracker.eventId+' verified by append readback.');return json({saved:true,receipt:workflow.tracker,message:workflow.tracker.recordId+' confirmed in the tracker. Owner application approval is still pending.'});}
+          if(running)throw new Error('Wait for the current task before saving to your tracker.');if(body.confirmReviewed!==true)throw new Error('Confirm that you reviewed this source and the proposed new discovery.');const own=body.ownerApplied===true;let workflow=body.workflowId?state.workflows.find(w=>w.id===body.workflowId):own?state.workflows.filter(w=>w.job.id===body.jobId).at(-1):undefined;
+          // Having applied is the owner's fact. A discovery that was held, or never reviewed, is saved on that statement with a trail that says so.
+          if(!workflow&&own){const job=state.results.find(j=>j.id===body.jobId);if(!job)throw new Error('Recorded discovery not found.');workflow={id:'HQ-W-'+randomUUID(),job,fit:state.profile?fitFor(job):null,fingerprint:state.profile?fingerprint(job,state.profile):'',createdAt:new Date(clock()).toISOString(),cvReadAt:state.profile?.readAt||null,receipts:[],draft:null,managerDecision:'Needs owner assessment',stage:'Owner decision',tracker:null};state.workflows=[...state.workflows,workflow];}
+          if(!workflow)throw new Error('Workflow not found.');if(workflow.tracker)return json({saved:true,receipt:workflow.tracker,message:'This workflow already has a verified tracker receipt.'});
+          if(own)workflow.ownerTrail??=ownerTrail(workflow,new Date(clock()).toISOString());
+          else{if(!state.profile||!fitFor(workflow.job).eligible)throw new Error('Held by current CV role screening. Check the Analyst findings; no tracker write started.');if(workflow.fingerprint!==fingerprint(workflow.job,state.profile))throw new Error('Run agents 02–04 to update this saved review under the current matching rules. No tracker write started.');}running=true;state.status='running';mark('00','Append reviewed discovery through the Coordinator bridge');
+          try{workflow.tracker=await appendWorkflow(workflow,(await connections.settings()).SCOUT_CONFIG||{},fetcher,{ownerApplied:own});event('00','Task completed',workflow.tracker.recordId+' / '+workflow.tracker.eventId+' verified by append readback.');return json({saved:true,receipt:workflow.tracker,message:workflow.tracker.recordId+' confirmed in the tracker. Owner application approval is still pending.'});}
           catch(error){event('00','Task failed',error.message);throw error;}
           finally{running=false;state.activeAgent=null;state.task=null;state.taskAt=null;state.taskContext=null;state.status=state.enabled?'waiting':'idle';await persist();}
         }
