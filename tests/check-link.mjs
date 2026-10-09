@@ -20,5 +20,8 @@ assert.equal((await post('link-job',{jobId:'OTHER-9',recordId:'JOB-0090'})).stat
 // Undone: the posting is its own entry again; undoing twice says so.
 assert.equal((await post('unlink-job',{jobId:'OTHER-9'})).status,200);assert.deepEqual([config.sameAs,(await view()).sameAs],[[],[]]);
 assert.match((await(await post('unlink-job',{jobId:'OTHER-9'})).json()).error,/no longer saved/);assert.equal(writes,0,'no record was changed');
+// A discovery can be marked Closed by the owner, with a reason; anything outside the fixed choices is refused.
+const plan=(status,n)=>post('planning-status',{jobId:'OTHER-9',status,reason:'The vacancy is no longer open.',requestId:'HQ-P-00000000-0000-4000-8000-00000000000'+n,expectedId:'',confirmStatus:true});
+assert.equal((await plan('Deleted',1)).status,400);const shut=await plan('Closed',2),kept=await shut.json();assert.equal(shut.status,200,kept.error);assert.equal(kept.status.status,'Closed');assert.equal(Object.values((await view()).ownerStatuses)[0].status,'Closed');assert.equal(writes,0);
 scout.close();
 console.log('Link checks passed: a verified job and a recorded discovery only, one link per posting, shown to the page, undone on request, no record changed. Synthetic values only.');
