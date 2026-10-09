@@ -1,5 +1,5 @@
 import {feedbackKey} from './owner-feedback.mjs';
-export const planningStatuses=['Discovered','Researching','Shortlisted','Preparing','Ready to apply','On hold'];
+export const planningStatuses=['Discovered','Researching','Shortlisted','Preparing','Ready to apply','On hold','Closed'];
 export function savePlanningStatus(config,job,body,at){
  if(!planningStatuses.includes(body.status)||!/^HQ-P-[a-f0-9-]{36}$/.test(body.requestId||'')||body.confirmStatus!==true)throw new Error('Confirm a supported planning status.');
  const reason=typeof body.reason==='string'?body.reason.trim():'';if(reason.length<3||reason.length>500)throw new Error('Record a reason of 3–500 characters.');
