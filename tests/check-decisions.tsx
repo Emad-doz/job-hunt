@@ -35,6 +35,11 @@ let writes=0;const reader=(snapshot:object):typeof fetch=>async url=>{if(url==='
 await assert.rejects(()=>recordDiscoveryApplication(review,{requestId:'x',appliedOn:'2026-10-04'},reader({...data,stale:true})),/fresh tracker record/);assert.equal(writes,0);
 await assert.rejects(()=>recordDiscoveryApplication(review,{requestId:'x',appliedOn:'2026-10-04'},reader({...data,jobs:[{...native,status:'Closed'}]})),/outcome was preserved/);assert.equal(writes,0);
 const prior=await recordDiscoveryApplication(review,{requestId:'x',appliedOn:'2026-10-04'},reader({...data,jobs:[{...native,status:'Interview',applied:'2026-10-03'}]}));assert(prior.alreadyRecorded);assert.equal(writes,0);
-await assert.rejects(()=>recordDiscoveryApplication(held,{requestId:'x',appliedOn:'2026-10-04'},fetcher),/eligible, current review/);
+// Having applied is the owner's fact: a held discovery, or one with no review, is saved on that statement, and the request says so.
+{const sent:Record<string,unknown>[]=[];const owning:typeof fetch=async(url,init)=>{if(url==='/api/scout'){sent.push(JSON.parse(String(init!.body)));return Response.json({saved:true,receipt:{recordId:native.id}});}if(url==='/api/snapshot')return Response.json({...data,jobs:[{...native,status:'Applied',applied:'2026-10-03'}]});throw new Error('Unexpected write');};
+  assert((await recordDiscoveryApplication(held,{requestId:'x',appliedOn:'2026-10-04'},owning)).alreadyRecorded);assert.deepEqual(sent[0],{action:'append',workflowId:held.id,confirmReviewed:true,ownerApplied:true,jobId:held.job.id});
+  assert((await recordDiscoveryApplication(undefined,{requestId:'x',appliedOn:'2026-10-04'},owning,'SOURCE-7')).alreadyRecorded);assert.deepEqual(sent[1],{action:'append',jobId:'SOURCE-7',confirmReviewed:true,ownerApplied:true});
+  await assert.rejects(()=>recordDiscoveryApplication(undefined,{requestId:'x',appliedOn:'2026-10-04'},owning),/no longer listed/);assert.equal(sent.length,2);
+  await recordDiscoveryApplication(review,{requestId:'x',appliedOn:'2026-10-04'},owning);assert.equal(sent[2].ownerApplied,undefined,'a recommended discovery is saved with its own review');}
 await assert.rejects(()=>requestOwnerFeedback({},async()=>Response.json({saved:true})),/No saved owner preference/);
 console.log('Owner decision / report UI checks passed: private preferences and undo, Applied history retained, verified native IDs, uncertain retry, stale/held/outcome guards, import disclosure and mobile accessibility.');

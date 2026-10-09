@@ -39,11 +39,25 @@ export function buildWorkflow(job,profile,{clock=Date.now,mark=()=>{},event=()=>
 // Where a record operation is sent. It is not a web address: the host answers it from the owner's database (server/node-host.mjs), and tests answer it themselves.
 export const RECORDS='hq-records:operation';
 export const sendRecord=(fetcher,operation)=>fetcher(RECORDS,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(operation),signal:AbortSignal.timeout(40000)});
-export async function appendWorkflow(workflow,config,fetcher=fetch){
-  
-  if(!workflow.draft)throw new Error('Analyst-held records need owner assessment before a Coordinator append.');
-  if(!workflow.fit?.eligible||workflow.fit.version!==MATCH_VERSION)throw new Error('This discovery needs a current CV role review before a Coordinator append.');
-  const response=await sendRecord(fetcher,{operation:'append-reviewed-discovery',workflowId:workflow.id,job:workflow.job,receipts:workflow.receipts,decision:workflow.managerDecision});
+// The owner applied to a vacancy the screening holds, or that was never reviewed. That is the owner's decision; the trail says plainly which steps did not happen and why. It is made once and kept, so a retry sends the same receipts.
+export const OWNER_APPLIED='Owner reports having applied; saved on the owner\'s decision';
+export function ownerTrail(workflow,at){
+  if(workflow.receipts.length===5)return workflow.receipts;
+  const receipts=workflow.receipts.slice(0,2),job=workflow.job,add=(agentId,title,findings,decision,method)=>receipts.push({id:'HQ-R-'+randomUUID(),workflowId:workflow.id,agentId,at,inputReceipt:receipts.at(-1)?.id||null,title,method,findings,decision});
+  if(!receipts.length)add('01','Record source evidence',[{label:'Source',value:job.source+' / '+job.sourceId},{label:'Availability',value:String(job.availability||'Not recorded')},{label:'Read time',value:String(job.readAt||'Not recorded')}],'Source recorded; not an application','Source response or owner-provided import');
+  if(receipts.length<2)add('02','Compare vacancy and professional CV evidence',[{label:'CV role screening',value:'No screening was recorded for this discovery before the owner reported the application.'}],'Not screened','No comparison performed');
+  const hold=receipts[1].decision;
+  add('03','Prepare application review materials',[{label:'Draft',value:'None prepared in HQ.'},{label:'Reason',value:'The owner reports having applied already.'}],'Skipped on the owner\'s decision','No draft prepared');
+  add('04','Review draft and evidence completeness',[{label:'Screening result',value:hold},{label:'Owner decision',value:'The owner checked the vacancy and applied. The screening is advice and does not decide this.'},{label:'Submission',value:'No application, message or outcome change performed by HQ.'}],'Not reviewed in HQ; '+OWNER_APPLIED,'Owner statement; no check performed');
+  add('00','Prepare Coordinator review queue',[{label:'Tracker state',value:'Saved so the owner can record the application.'},{label:'Screening result kept',value:hold}],OWNER_APPLIED,'Owner-confirmed save');
+  return receipts;
+}
+export async function appendWorkflow(workflow,config,fetcher=fetch,{ownerApplied=false}={}){
+  if(!ownerApplied){
+    if(!workflow.draft)throw new Error('Analyst-held records need owner assessment before a Coordinator append.');
+    if(!workflow.fit?.eligible||workflow.fit.version!==MATCH_VERSION)throw new Error('This discovery needs a current CV role review before a Coordinator append.');
+  }
+  const response=await sendRecord(fetcher,{operation:'append-reviewed-discovery',workflowId:workflow.id,job:workflow.job,receipts:ownerApplied?workflow.ownerTrail:workflow.receipts,decision:ownerApplied&&workflow.ownerTrail!==workflow.receipts?OWNER_APPLIED:workflow.managerDecision});
   if(!response.ok)throw new Error('The database did not accept the request (HTTP '+response.status+'). No successful write confirmed.');
   let result;try{result=await response.json();}catch{throw new Error('Bridge did not return a verified result. Check the deployment and retry the same workflow ID.');}
   if(!result.ok||!/^JOB-\d+$/.test(result.recordId)||!/^EVT-\d+$/.test(result.eventId))throw new Error(result.error||'No verified append receipt returned.');
