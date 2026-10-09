@@ -1,5 +1,5 @@
 import type {Job,Snapshot,Activity} from './data';
-import type {ScoutState} from './scout';
+import type {ScoutState,SameAs} from './scout';
 import type {ReviewWorkflow} from './workflow';
 import {canAppendReview} from './match';
 import {ownerFeedbackFor,type OwnerFeedback} from './owner-feedback-model';
@@ -8,7 +8,7 @@ import type {MatchAssessment} from './match';
 import {ownerStatusFor} from './owner-status-model';
 
 export type JobGroup='All jobs'|'Recommended'|'Tracked'|'Applied'|'Held'|'Not a fit'|'Rejected'|'Discovered'|'Interview'|'Offer';
-export type JobItem={key:string;title:string;employer:string;location:string;salary:string;job?:Job;relatedJobs?:Job[];review?:ReviewWorkflow;discovery?:ReviewWorkflow['job'];fit?:MatchAssessment;aliases?:string[];label:string;group:JobGroup;interview?:{date:string;time:string};foundAt?:string;ownerFeedback?:OwnerFeedback;evidence?:ReturnType<typeof applicationEvidence>};
+export type JobItem={key:string;title:string;employer:string;location:string;salary:string;job?:Job;relatedJobs?:Job[];linked?:SameAs[];review?:ReviewWorkflow;discovery?:ReviewWorkflow['job'];fit?:MatchAssessment;aliases?:string[];label:string;group:JobGroup;interview?:{date:string;time:string};foundAt?:string;ownerFeedback?:OwnerFeedback;evidence?:ReturnType<typeof applicationEvidence>};
 export function applicationEvidence(job:Job,events:Activity[]){const linked=events.filter(e=>e.recordId===job.id);if(linked.some(e=>e.type==='Confirmation'&&/receipt read through the private (?:Outlook|Gmail) connection/i.test(e.details)))return {label:'Reviewed email evidence',detail:'A matching message was read through HQ and reviewed before its reference was saved.'};if(job.confirmation?.trim()||linked.some(e=>/confirmation/i.test(e.type)&&!/(?:owner|candidate) (?:reports|reference)/i.test(e.details)))return {label:'Recorded reference',detail:'Evidence is recorded in the database. Read its source and method before treating it as a verified receipt.'};if(linked.some(e=>/Owner reports an application submitted/i.test(e.details)))return {label:'Owner-reported · receipt not saved',detail:'The application was recorded after your confirmation in HQ. No submission reference is saved here; this does not establish whether a mailbox search would find one.'};return {label:'Receipt not saved',detail:'The tracker records an application stage or date. No submission reference is recorded here.'};}
 export const applicationRecorded=(job:Job)=>!!job.applied||['Applied','Submitted','Interview','Offer','Hired'].includes(job.status);
 // Where a vacancy sits in the Jobs lists. Rejected collects recorded outcomes that ended (Rejected, Withdrawn, Closed); Archive is the owner's private "not for me"; everything else is active.
@@ -30,6 +30,9 @@ export function collectJobs(data:Snapshot,state:ScoutState):JobItem[]{
   const newest=state.protected?(state.workflows||[]).filter(w=>!w.superseded).slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)):[];
   const discoveryHistory=state.protected?[...(state.workflows||[]).map(w=>({...w.job,createdAt:w.createdAt})),...state.results]:[];
   const items:JobItem[]=[],byUrl=new Map<string,JobItem>(),byId=new Map<string,JobItem>();
+  // Postings the owner linked to a job: by the discovery's ID, and by its address so the same posting found again stays linked.
+  const links=state.protected?state.sameAs||[]:[],linkFor=(id:string,url:string)=>links.find(l=>l.jobId===id)||(sourceIdentity(url)?links.find(l=>sourceIdentity(l.url)===sourceIdentity(url)):undefined);
+  const joined=(id:string,url:string)=>{const link=linkFor(id,url),item=link?byId.get(link.recordId):undefined;if(item&&link&&!item.linked?.some(l=>l.jobId===link.jobId))item.linked=[...(item.linked||[]),link];return item;};
   const register=(item:JobItem,url:string,id:string)=>{if(sourceIdentity(url))byUrl.set(sourceIdentity(url),item);if(id)byId.set(id,item);};
   for(const job of data.mode==='synced'||!state.protected?data.jobs:[]){
     const existing=byUrl.get(sourceIdentity(job.url));
@@ -39,12 +42,12 @@ export function collectJobs(data:Snapshot,state:ScoutState):JobItem[]{
   // Verified native IDs take priority over URL inference. Older receipts remain
   // inspectable; no native ID is invented for a discovery.
   for(const review of [...newest.filter(w=>w.tracker),...newest.filter(w=>!w.tracker)]){
-    const url=review.job.url,existing=(review.tracker?byId.get(review.tracker.recordId):undefined)||byId.get(review.job.id)||byUrl.get(sourceIdentity(url));
+    const url=review.job.url,existing=(review.tracker?byId.get(review.tracker.recordId):undefined)||byId.get(review.job.id)||byUrl.get(sourceIdentity(url))||(review.tracker?undefined:joined(review.job.id,url));
     if(existing){existing.aliases!.push('review:'+review.id);if(!existing.review){existing.review=review;existing.fit=review.currentFit;}register(existing,url,review.job.id);continue;}
     const item:JobItem={key:'review:'+review.id,aliases:['review:'+review.id],title:review.job.title,employer:review.job.employer,location:review.job.location,salary:review.job.salary,foundAt:earliestDiscovery(review.job.id,url,discoveryHistory),review,discovery:review.job,fit:review.currentFit,label:review.tracker?'Saved · tracker refresh needed':'Discovered',group:review.currentFit?.eligible?'Recommended':'Held'};items.push(item);register(item,url,review.job.id);
   }
   for(const discovery of state.protected?state.results:[]){
-    const existing=byId.get(discovery.id)||byUrl.get(sourceIdentity(discovery.url));
+    const existing=byId.get(discovery.id)||byUrl.get(sourceIdentity(discovery.url))||joined(discovery.id,discovery.url);
     if(existing){existing.discovery=discovery;existing.aliases!.push('discovery:'+discovery.id);if(!existing.review)existing.fit=discovery.fit;register(existing,discovery.url,discovery.id);continue;}
     const item:JobItem={key:'discovery:'+discovery.id,aliases:['discovery:'+discovery.id],title:discovery.title,employer:discovery.employer,location:discovery.location,salary:discovery.salary,foundAt:earliestDiscovery(discovery.id,discovery.url,discoveryHistory),discovery,fit:discovery.fit,label:'Discovered',group:discovery.fit?.eligible?'Recommended':'Held'};items.push(item);register(item,discovery.url,discovery.id);
   }
