@@ -1,6 +1,7 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {readCv,readCvMaterial,overlap} from './cv-reader.mjs';
 import {defaultBoards,parseBoards,boardText,readBoard,importedListing,canonical} from './sources.mjs';
+import {readVacancyPage} from './vacancy-page.mjs';
 import {buildWorkflow,fingerprint,sendRecord,appendWorkflow,ownerTrail} from './workflow.mjs';
 import {reviewPdf} from './report.mjs';
 import {SEARCH_LIMITS,searchAdzuna,searchTerms} from './search-plan.mjs';
@@ -27,7 +28,7 @@ export function mapListing(item,profile,readAt){
   const description=plain(item.description),skills=overlap(profile.skills,item.title+' '+description),salary=[item.salary_min,item.salary_max].filter(x=>Number.isFinite(x)&&x>0);
   return {id:'ADZUNA-'+item.id,sourceId:String(item.id),originalPostingId:String(item.id),title:plain(item.title),employer:plain(item.company?.display_name)||'Not supplied',location:plain(item.location?.display_name)||'Not supplied',url:safeListing(item.redirect_url),description,skills,salary:salary.length?(String(item.salary_is_predicted)==='1'?'Adzuna estimate: ':'Source range: ')+salary.map(n=>n.toLocaleString('en-GB')).join('–')+' · currency / period not supplied':'Unknown',publishedAt:item.created||null,readAt,source:'Adzuna',availability:'Present in source response; employer availability unverified'};
 }
-export function createScout(connections,environment,{fetcher=fetch,cvReader=readCv,cvMaterialReader=readCvMaterial,modelCall,triageCall=bundledCall('requestTriage'),researchCall=bundledCall('requestCompanyResearch'),motivationCall=bundledCall('requestMotivation'),profileCall=bundledCall('requestProfile'),tailorCall=bundledCall('requestTailoredCv'),cvStore=null,profileStore=null,clock=Date.now,intervalMs=period,boardsDefault=defaultBoards}={}){
+export function createScout(connections,environment,{pageReader=url=>readVacancyPage(url),fetcher=fetch,cvReader=readCv,cvMaterialReader=readCvMaterial,modelCall,triageCall=bundledCall('requestTriage'),researchCall=bundledCall('requestCompanyResearch'),motivationCall=bundledCall('requestMotivation'),profileCall=bundledCall('requestProfile'),tailorCall=bundledCall('requestTailoredCv'),cvStore=null,profileStore=null,clock=Date.now,intervalMs=period,boardsDefault=defaultBoards}={}){
   let state={enabled:false,status:'not-connected',activeAgent:null,task:null,taskAt:null,taskContext:null,lastRun:null,lastSuccess:null,nextCheck:null,error:null,stale:false,profile:null,results:[],events:[],attempts:0,day:'',sources:[],workflows:[],workflowNotice:null,reviewRun:null,aiReviews:[],aiUsage:{day:'',count:0},aiRun:null,motivations:[],motivationRun:null,ownerTexts:{},modelFits:{},triageRun:null,jsearchUsage:{month:'',count:0},jsearchCursor:0,jsearchLast:null,jsearchAt:null},timer=null,running=false,closed=false;
   // Building the full view (screening every discovery, serialising megabytes) is slow, so it is kept until the state changes: a task step, a saved change, or a minute passing.
   let revision=0,held=null;const touch=()=>{revision++;};
@@ -395,6 +396,8 @@ export function createScout(connections,environment,{fetcher=fetch,cvReader=read
         if(body.action==='sources'){
           if(running)throw new Error('Wait for the current check before changing sources.');const boards=parseBoards(body.boards);await connections.updateScout(c=>({...c,boards}));return json({saved:true,message:'Employer boards saved. They will be checked on the next Scout run.'});
         }
+        // Reads the page behind a link the owner pasted and hands back what it says, for the owner to check. Nothing is recorded by this step.
+        if(body.action==='read-vacancy'){const vacancy=await pageReader(body.url);event('01','Vacancy page read',(vacancy.employer||'Employer not given')+' / '+(vacancy.title||'Role not given')+' · read at the owner\'s request; not recorded yet.');return json({read:true,vacancy,message:vacancy.basis==='structured'?'Read from the job details this page publishes. Check the fields before adding.':'This page has no structured job details, so its title and text were used. Check and complete the fields before adding.'});}
         if(body.action==='import'){
           if(running)throw new Error('Wait for the current task before importing.');if(state.workflows.length>=REVIEW_LIMIT)throw new Error('The private review workbench is at capacity; previous evidence is retained.');running=true;state.status='running';
           try{mark('01','Read private CV for an owner-provided vacancy');state.profile=await cvReader(await connections.settings(),fetcher);const proposed=importedListing(body,state.profile,new Date(clock()).toISOString()),existing=state.results.find(j=>canonical(j.url)===canonical(proposed.url)),job=existing||proposed;

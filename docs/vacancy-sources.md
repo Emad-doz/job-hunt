@@ -29,7 +29,9 @@ In **Sources & imports** you can list career pages of employers you want watched
 
 ## Pasting a vacancy yourself
 
-On Today, **Import vacancies** takes a vacancy you paste in: for a posting from a site none of the sources cover, or one somebody sent you.
+On Today, **Import vacancies** takes a vacancy from a link: for a posting from a site none of the sources cover, or one somebody sent you. Paste the link and press **Read this vacancy**. The app fetches that one page and fills in the role, employer, location, pay and vacancy text, from the structured job details most career sites publish, or otherwise from the page's title and text. You check the fields and then add it.
+
+Some sites refuse to be read this way (LinkedIn and Indeed among them), need a sign-in, or build the page in the browser. The app then says so, and you use **Add a vacancy manually** and paste the text. Only public `https` pages are read; an address on your own machine or network is refused.
 
 ## The hourly check
 

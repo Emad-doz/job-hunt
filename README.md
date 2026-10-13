@@ -67,6 +67,7 @@ What leaves your machine, and only then:
 | A search runs | Your role search terms and search area. Never your CV. | The vacancy sources you connected |
 | You start a screening, an assessment, a motivation draft, "Fill from my CV" or "Adapt my CV" | CV text or details, and the vacancy text | The AI provider you chose, with your own API key (nobody, with a local model) |
 | You press "Check for replies" | A read-only request for your recent mail | Microsoft or Google, for your own mailbox |
+| You press "Read this vacancy" on a link | One request for that page, with no data of yours | The site the link points to |
 
 Without an AI key and without a mailbox connection, the second and third rows never happen.
 
