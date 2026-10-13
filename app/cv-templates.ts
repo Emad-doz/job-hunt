@@ -15,7 +15,9 @@ const safeColour=(value:string)=>/^#[0-9a-fA-F]{6}$/.test(value)?value:accents[0
 const safePhoto=(value:string)=>/^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(value)?value:'';
 const span=(start:string,end:string)=>[start,end].filter(Boolean).map(esc).join(' – ');
 const linkText=(value:string)=>esc(value.replace(/^https?:\/\/(www\.)?/,'').replace(/\/$/,''));
-// A section moves to the next page as a whole when it does not fit. A list of entries may run over pages, but never splits an entry and never leaves its heading behind alone.
+// A short block moves to the next page as a whole when it does not fit. A tall one would leave a large empty space behind, so it may continue on the next page (fitBreaks marks those); a heading is never left behind alone and a single line or bullet is never cut.
+export const WHOLE_LIMIT_MM=45;
+export function fitBreaks(doc:Document|null|undefined){if(!doc)return 0;const limit=WHOLE_LIMIT_MM*96/25.4;let marked=0;for(const block of doc.querySelectorAll<HTMLElement>('article,.whole')){const tall=block.getBoundingClientRect().height>limit;block.classList.toggle('split',tall);if(tall)marked++;}return marked;}
 const section=(title:string,body:string)=>body?'<section class="whole"><h2>'+esc(title)+'</h2>'+body+'</section>':'';
 const entries=(title:string,items:string[])=>items.length?'<section><div class="whole"><h2>'+esc(title)+'</h2>'+items[0]+'</div>'+items.slice(1).join('')+'</section>':'';
 // The body sits in a one-cell table whose header and footer rows are empty spacers: the browser repeats them on every printed page, which gives each page a top and bottom margin while a coloured band or column can still reach the paper's edge.
@@ -34,7 +36,7 @@ function parts(p:Profile){
 }
 const base=(accent:string)=>`@page{size:A4;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:"Segoe UI",Calibri,Arial,Helvetica,sans-serif;color:#1f2933;font-size:10.5pt;line-height:1.42;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff}h1{margin:0;font-size:24pt;line-height:1.1;letter-spacing:.01em}h2{margin:0 0 6pt;font-size:10pt;letter-spacing:.12em;text-transform:uppercase;color:${accent}}h3{margin:0;font-size:11pt}
-p{margin:0 0 5pt;orphans:3;widows:3}ul{margin:3pt 0 0;padding-left:14pt}li{margin-bottom:2pt;break-inside:avoid}section{margin-bottom:13pt}article{margin-bottom:9pt;break-inside:avoid;page-break-inside:avoid}.whole{break-inside:avoid;page-break-inside:avoid}h2,h3{break-after:avoid;page-break-after:avoid}
+p{margin:0 0 5pt;orphans:3;widows:3}ul{margin:3pt 0 0;padding-left:14pt}li{margin-bottom:2pt;break-inside:avoid}section{margin-bottom:13pt}article{margin-bottom:9pt;break-inside:avoid;page-break-inside:avoid}.whole{break-inside:avoid;page-break-inside:avoid}article.split,.whole.split{break-inside:auto;page-break-inside:auto}article>header{break-after:avoid;page-break-after:avoid;break-inside:avoid}h2,h3{break-after:avoid;page-break-after:avoid}
 table.flow{width:100%;border-collapse:collapse;border-spacing:0}table.flow td{padding:0;vertical-align:top}.gap{height:13mm}article header{display:flex;justify-content:space-between;gap:12pt;align-items:baseline}
 time{white-space:nowrap;font-size:9pt;color:#52606d}.where{margin:0;color:#52606d;font-size:9.5pt}.headline{margin:3pt 0 0;font-size:12pt;color:#3e4c59}.contact{margin:6pt 0 0;font-size:9.5pt;color:#3e4c59}
 ul.plain{list-style:none;padding:0}ul.tags{list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:4pt}ul.tags li{margin:0;padding:1.5pt 7pt;border:.75pt solid #cbd2d9;border-radius:9pt;font-size:9pt}

@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {Check,Download,FileText,Plus,Sparkles,Trash2,Upload} from 'lucide-react';
 import './profile.css';
-import {renderCv,templates,accents,type TemplateId} from './cv-templates';
+import {renderCv,templates,accents,fitBreaks,type TemplateId} from './cv-templates';
 import type {ScoutState} from './scout';
 import {zone} from './zone';
 type Variant={jobId:string;employer:string;title:string;profile:Profile;changes:string[];dropped:string[];note:string};
@@ -39,7 +39,7 @@ export default function ProfilePage({onSettings,scout,request}:{onSettings:()=>v
   async function uploadPhoto(chosen:File|undefined){if(!chosen||busy)return;if(!['image/jpeg','image/png'].includes(chosen.type)){setError('Choose a JPG or PNG picture.');return;}if(chosen.size>2_000_000){setError('Choose a photo of at most 2 MB.');return;}setBusy(true);setError('');setNotice('');try{const r=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':chosen.type},body:chosen,signal:AbortSignal.timeout(60000)}),v=await r.json() as {saved?:boolean;photo?:Photo;message?:string;error?:string};if(!r.ok||!v.saved||!v.photo)throw new Error(v.error||'The photo was not stored.');setState(s=>s?{...s,photo:v.photo!}:s);setNotice(v.message||'Stored.');}catch(e){setError(e instanceof Error?e.message:'The photo was not stored.');}finally{setBusy(false);if(picture.current)picture.current.value='';}}
   async function removePhoto(){if(busy)return;setBusy(true);setError('');setNotice('');try{const r=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'remove-photo'}),signal:AbortSignal.timeout(30000)}),v=await r.json() as {saved?:boolean;message?:string;error?:string};if(!r.ok||!v.saved)throw new Error(v.error||'The photo was not removed.');setState(s=>s?{...s,photo:null}:s);setNotice(v.message||'Removed.');}catch(e){setError(e instanceof Error?e.message:'The photo was not removed.');}finally{setBusy(false);}}
   // The browser prints the CV page to a file; "Save as PDF" is the destination to choose in its dialog.
-  const print=()=>{const page=sheet.current?.contentWindow;if(page){page.focus();page.print();}};
+  const print=()=>{const page=sheet.current?.contentWindow;if(page){fitBreaks(sheet.current?.contentDocument);page.focus();page.print();}};
   if(error&&!state)return <section className="scout-view"><div className="connection-feedback error" role="alert">{error}</div></section>;
   if(!state||!profile)return <section className="scout-view"><p className="quiet">Loading your CV…</p></section>;
   if(!state.protected)return null;
@@ -75,7 +75,7 @@ export default function ProfilePage({onSettings,scout,request}:{onSettings:()=>v
       <div className="cv-options"><div className="cv-accents" role="group" aria-label="Accent colour">{accents.map(c=><button key={c} aria-label={'Accent colour '+c} aria-pressed={c===accent} className={c===accent?'active':''} style={{background:c}} onClick={()=>setAccent(c)}/>)}</div>
         <div className="cv-photo"><input ref={picture} type="file" accept="image/jpeg,image/png" hidden onChange={e=>uploadPhoto(e.target.files?.[0])}/>{photoData&&<img src={photoData} alt="Your profile photo"/>}<button className="subtle-button" disabled={busy} onClick={()=>picture.current?.click()}><Upload size={15}/>{state.photo?'Replace photo':'Upload a photo'}</button>{state.photo&&<button className="text-button" disabled={busy} onClick={removePhoto}><Trash2 size={14}/>Remove</button>}{state.photo&&<label className="cv-check"><input type="checkbox" checked={withPhoto} disabled={!chosen.photo} onChange={e=>setWithPhoto(e.target.checked)}/> {chosen.photo?'Show my photo on this CV':'This template has no photo'}</label>}</div>
         <button className="primary-button" onClick={print}><Download size={16}/>Download PDF</button></div>
-      <div className="cv-preview"><iframe ref={sheet} title="CV preview" sandbox="allow-same-origin allow-modals" srcDoc={shown?renderCv(shown,template,{accent,photo:showPhoto?photoData:''}):''}/></div></article>;})()}
+      <div className="cv-preview"><iframe ref={sheet} title="CV preview" sandbox="allow-same-origin allow-modals" onLoad={e=>fitBreaks(e.currentTarget.contentDocument)} srcDoc={shown?renderCv(shown,template,{accent,photo:showPhoto?photoData:''}):''}/></div></article>;})()}
     <p className="quiet">Screening reads your CV from the file stored here. An adapted CV is not saved: it exists until you leave this page or go back to your full CV.</p>
   </section>;
 }
